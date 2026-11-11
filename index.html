@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Gastos</title>
+  <meta name="theme-color" content="#0f766e">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Gastos">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="top">
+    <h1>Gastos</h1>
+    <button id="btn-data" class="ghost">Ajustes</button>
+  </header>
+
+  <main>
+    <!-- Alta rápida -->
+    <form id="add-form" class="card" autocomplete="off" novalidate>
+      <div class="seg" role="radiogroup" aria-label="Tipo de movimiento">
+        <label><input type="radio" name="type" value="expense" checked>Gasto</label>
+        <label><input type="radio" name="type" value="income">Ingreso</label>
+      </div>
+      <div class="amount-row">
+        <input id="add-amount" name="amount" inputmode="decimal" placeholder="0,00" aria-label="Importe en euros" required>
+        <span class="euro">€</span>
+      </div>
+      <div id="add-cats" class="chips" role="radiogroup" aria-label="Categoría"></div>
+      <div class="seg small" role="radiogroup" aria-label="Ámbito">
+        <label><input type="radio" name="scope" value="personal" checked>Personal</label>
+        <label><input type="radio" name="scope" value="business">Agencia</label>
+      </div>
+      <div class="row">
+        <input name="date" type="date" aria-label="Fecha" required>
+        <select name="method" aria-label="Método de pago"></select>
+      </div>
+      <input name="note" type="text" placeholder="Nota (opcional). Usa #etiquetas" maxlength="120" aria-label="Nota">
+      <label class="check"><input type="checkbox" name="repeat">Repetir cada mes</label>
+      <button type="submit" class="primary" id="add-submit">Guardar gasto</button>
+      <p id="add-msg" class="msg" role="status" aria-live="polite"></p>
+    </form>
+
+    <!-- Resumen del mes -->
+    <div id="view" class="seg three" role="radiogroup" aria-label="Qué movimientos ver">
+      <label><input type="radio" name="view" value="" checked>Todo</label>
+      <label><input type="radio" name="view" value="personal">Personal</label>
+      <label><input type="radio" name="view" value="business">Agencia</label>
+    </div>
+
+    <section class="card">
+      <div class="month-nav">
+        <button id="prev-month" class="ghost" aria-label="Mes anterior">‹</button>
+        <h2 id="month-label"></h2>
+        <button id="next-month" class="ghost" aria-label="Mes siguiente">›</button>
+      </div>
+      <p class="total"><span id="month-total">0,00 €</span><small id="month-count"></small></p>
+      <dl class="balance">
+        <div><dt>Ingresos</dt><dd id="month-income">0,00 €</dd></div>
+        <div><dt>Balance</dt><dd id="month-balance">0,00 €</dd></div>
+      </dl>
+      <ul id="alerts" class="alerts" role="status" aria-live="polite"></ul>
+      <ul id="by-cat" class="by-cat"></ul>
+    </section>
+
+    <section class="card">
+      <div class="chart-head">
+        <h2>Evolución</h2>
+        <select id="chart-category" aria-label="Categoría del gráfico"></select>
+      </div>
+      <ul id="chart-legend" class="legend"></ul>
+      <div id="chart" class="chart"></div>
+      <p id="chart-detail" class="msg" role="status" aria-live="polite"></p>
+      <details class="chart-table">
+        <summary>Ver los datos en tabla</summary>
+        <table><thead><tr><th>Mes</th><th>Gastos</th><th>Ingresos</th></tr></thead><tbody id="chart-rows"></tbody></table>
+      </details>
+    </section>
+
+    <section class="card">
+      <h2 class="section-title">Movimientos</h2>
+      <input id="search" type="search" placeholder="Buscar: nota, categoría, #etiqueta…" aria-label="Buscar movimientos" autocomplete="off">
+      <details id="filters" class="filters">
+        <summary>Filtros</summary>
+        <div class="filter-grid">
+          <select id="f-category" aria-label="Filtrar por categoría"></select>
+          <select id="f-method" aria-label="Filtrar por método de pago"></select>
+          <select id="f-tag" aria-label="Filtrar por etiqueta"></select>
+        </div>
+        <label class="check"><input type="checkbox" id="f-all">Buscar en todos los meses</label>
+      </details>
+      <p id="filter-summary" class="filter-summary" role="status" aria-live="polite"></p>
+      <div id="list"></div>
+    </section>
+    <p id="sync-status" class="msg sync-status" role="status" aria-live="polite"></p>
+  </main>
+
+  <!-- Editar -->
+  <dialog id="edit-dialog">
+    <form id="edit-form" method="dialog" novalidate>
+      <h2>Editar movimiento</h2>
+      <label>Tipo<select name="type"><option value="expense">Gasto</option><option value="income">Ingreso</option></select></label>
+      <label>Ámbito<select name="scope"><option value="personal">Personal</option><option value="business">Agencia</option></select></label>
+      <label>Importe (€)<input name="amount" inputmode="decimal" required></label>
+      <label>Categoría<select name="category"></select></label>
+      <label>Fecha<input name="date" type="date" required></label>
+      <label>Método de pago<select name="method"></select></label>
+      <label>Nota<input name="note" type="text" maxlength="120"></label>
+      <p id="edit-msg" class="msg" role="status"></p>
+      <div class="actions">
+        <button type="button" id="edit-delete" class="danger">Borrar</button>
+        <span class="spacer"></span>
+        <button type="button" id="edit-cancel" class="ghost">Cancelar</button>
+        <button type="submit" class="primary">Guardar</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Ajustes -->
+  <dialog id="data-dialog">
+    <h2>Ajustes</h2>
+
+    <h3>Presupuesto mensual por categoría</h3>
+    <p class="hint">Deja el campo vacío si no quieres límite. Te aviso al llegar al 80 % y al 100 %.</p>
+    <div id="budgets" class="budgets"></div>
+
+    <h3>Recurrentes</h3>
+    <ul id="recurring-list" class="recurring"></ul>
+
+    <h3>Sincronización entre dispositivos</h3>
+    <p class="hint">Opcional. Pon la URL del webhook de n8n y la misma clave en todos tus dispositivos. Déjalo vacío para no sincronizar.</p>
+    <label>URL del webhook<input id="sync-url" type="url" inputmode="url" placeholder="https://…/webhook/gastos-sync" autocapitalize="off" autocomplete="off" spellcheck="false"></label>
+    <label>Clave<input id="sync-key" type="text" autocapitalize="off" autocomplete="off" spellcheck="false"></label>
+    <div class="stack">
+      <button id="sync-save" class="primary">Guardar y sincronizar</button>
+      <button id="sync-generate">Generar clave nueva</button>
+    </div>
+    <p id="sync-msg" class="msg" role="status" aria-live="polite"></p>
+
+    <h3>Copia de seguridad</h3>
+    <p class="hint">Tus datos se guardan solo en este dispositivo. Exporta una copia de vez en cuando.</p>
+    <div class="stack">
+      <button id="export-json" class="primary">Exportar JSON (copia completa)</button>
+      <button id="export-csv">Exportar CSV (Excel / Sheets)</button>
+      <button id="import-btn">Importar JSON o CSV</button>
+      <input id="import-file" type="file" accept=".json,.csv,application/json,text/csv" hidden>
+    </div>
+    <p id="data-msg" class="msg" role="status" aria-live="polite"></p>
+    <div class="actions"><span class="spacer"></span><button id="data-close" class="ghost">Cerrar</button></div>
+  </dialog>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>
