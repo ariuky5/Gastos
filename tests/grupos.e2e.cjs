@@ -100,7 +100,7 @@ const server = http.createServer((req, res) => {
   if (process.argv[2]) await page.screenshot({ path: process.argv[2], fullPage: false });
 
   // Quitar el grupo: los movimientos siguen en Personal
-  await page.click('#btn-data');
+  await page.click('#btn-data'); await page.$$eval('details.fold', (ds) => ds.forEach((d) => { d.open = true; }));
   await page.click('#groups-list li:has-text("Viaje Roma") button');
   await page.click('#data-close');
   assert.equal(await page.$eval('#view input:checked', (i) => i.value), '');

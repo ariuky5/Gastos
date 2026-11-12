@@ -1,5 +1,6 @@
 import * as db from './db.js';
 import * as sync from './sync.js';
+import * as lock from './lock.js';
 import {
   METHODS, categoriesFor, emojiFor, formatCents, centsToInput, parseAmount, todayISO, shiftMonth, monthLabel, dayLabel,
   summarize, budgetRows, normalizeExpense, normalizeRecurring, dueRecurring, toCSV, fromCSV, toJSON, fromJSON,
@@ -770,6 +771,7 @@ $('#btn-data').addEventListener('click', () => {
   $('#sync-key').value = cfg.key;
   $('#export-csv').textContent = state.view ? `Exportar CSV (solo ${viewGroup() ? viewLabel() : viewLabel().toLowerCase()})` : 'Exportar CSV (Excel / Sheets)';
   renderGroups();
+  renderPin();
   showMsg($('#data-msg'), `${state.expenses.length} movimientos guardados en este dispositivo.`);
   dataDialog.showModal();
 });
@@ -917,13 +919,95 @@ $('#sync-save').addEventListener('click', async () => {
     for (const key of Object.keys(state.meta)) if (state.meta[key].updatedAt) await saveMeta(key, state.meta[key].value, state.meta[key].updatedAt, true);
   }
   await runSync();
+  schedulePoll();
 });
 
+// Casi tiempo real: mientras la app está a la vista, mira si hay cambios cada 30 s (una llamada al webhook).
+// En segundo plano no consulta nada.
+const POLL_MS = 30000;
+let pollTimer;
+function schedulePoll() {
+  clearInterval(pollTimer);
+  if (document.visibilityState === 'visible' && sync.isEnabled()) pollTimer = setInterval(runSync, POLL_MS);
+}
 window.addEventListener('online', runSync);
-document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') runSync(); });
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') runSync();
+  schedulePoll();
+});
+
+$('#btn-refresh').addEventListener('click', async () => {
+  if (!sync.isEnabled()) return location.reload();
+  const btn = $('#btn-refresh');
+  btn.classList.add('spinning');
+  btn.disabled = true;
+  try { await runSync(); } finally { btn.classList.remove('spinning'); btn.disabled = false; schedulePoll(); }
+});
+
+// ---------- Bloqueo con PIN ----------
+const LOCK_AFTER_MS = 60000;
+let hiddenAt = 0;
+function showLock() {
+  if (!lock.hasPin()) return;
+  document.querySelectorAll('dialog[open]').forEach((d) => d.close());
+  document.body.classList.add('locked');
+  $('#lock').hidden = false;
+  $('#lock-msg').textContent = '';
+  const input = $('#lock-form').pin;
+  input.value = '';
+  input.focus();
+}
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') hiddenAt = Date.now();
+  else if (hiddenAt && Date.now() - hiddenAt >= LOCK_AFTER_MS) showLock();
+});
+$('#lock-form').addEventListener('submit', async (ev) => {
+  ev.preventDefault();
+  const input = ev.target.pin;
+  try {
+    if (await lock.checkPin(input.value)) {
+      $('#lock').hidden = true;
+      document.body.classList.remove('locked');
+      input.value = '';
+      return;
+    }
+    showMsg($('#lock-msg'), 'PIN incorrecto.', true);
+  } catch (err) {
+    showMsg($('#lock-msg'), err.message, true);
+  }
+  input.value = '';
+  input.focus();
+});
+
+function renderPin() {
+  const on = lock.hasPin();
+  $('#pin-save').textContent = on ? 'Cambiar PIN' : 'Activar PIN';
+  $('#pin-remove').hidden = !on;
+}
+$('#pin-form').addEventListener('submit', async (ev) => {
+  ev.preventDefault();
+  const f = ev.target;
+  if (!lock.isValidPin(f.pin.value)) return showMsg($('#pin-msg'), 'El PIN tiene que tener de 4 a 8 cifras.', true);
+  if (f.pin.value !== f.pin2.value) return showMsg($('#pin-msg'), 'Los dos PIN no coinciden.', true);
+  await lock.setPin(f.pin.value);
+  f.reset();
+  renderPin();
+  showMsg($('#pin-msg'), 'PIN activado. Te lo pediré al abrir la app.');
+});
+$('#pin-remove').addEventListener('click', async () => {
+  const pin = prompt('Escribe tu PIN actual para quitarlo');
+  if (pin === null) return;
+  try {
+    if (!(await lock.checkPin(pin))) return showMsg($('#pin-msg'), 'PIN incorrecto.', true);
+  } catch (err) { return showMsg($('#pin-msg'), err.message, true); }
+  lock.clearPin();
+  renderPin();
+  showMsg($('#pin-msg'), 'PIN quitado.');
+});
 
 // ---------- Arranque ----------
 async function start() {
+  showLock();
   setPrivate(prefs.get('private', 'off') === 'on');
   try {
     // Las categorías y los grupos van primero: el formulario de alta los necesita.
@@ -963,5 +1047,6 @@ async function start() {
   if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
   runSync();
+  schedulePoll();
 }
 start();

@@ -74,7 +74,7 @@ const api = http.createServer((req, res) => {
         await page.waitForSelector(`.item:has-text("${note}")`);
       },
       async connect(key = KEY) {
-        await page.click('#btn-data');
+        await page.click('#btn-data'); await page.$$eval('details.fold', (ds) => ds.forEach((d) => { d.open = true; }));
         await page.fill('#sync-url', hook);
         await page.fill('#sync-key', key);
         await page.click('#sync-save');
@@ -88,7 +88,7 @@ const api = http.createServer((req, res) => {
   const A = await device('A');
   await A.add('2,50', 'Comida', 'café');
   await A.add('40', 'Supermercado', 'compra');
-  await A.page.click('#btn-data');
+  await A.page.click('#btn-data'); await A.page.$$eval('details.fold', (ds) => ds.forEach((d) => { d.open = true; }));
   await A.page.fill('#budgets input[data-category="Comida"]', '3');
   await A.page.locator('#budgets input[data-category="Comida"]').blur();
   await A.page.click('#data-close');
@@ -102,7 +102,7 @@ const api = http.createServer((req, res) => {
   step('sin configurar no se llama a ningún servidor');
 
   // Validaciones del formulario
-  await A.page.click('#btn-data');
+  await A.page.click('#btn-data'); await A.page.$$eval('details.fold', (ds) => ds.forEach((d) => { d.open = true; }));
   await A.page.fill('#sync-url', 'http://inseguro.example/webhook');
   await A.page.fill('#sync-key', KEY);
   await A.page.click('#sync-save');
@@ -184,19 +184,19 @@ const api = http.createServer((req, res) => {
   step('lo apuntado sin conexión se envía al volver');
 
   // Quitar un recurrente en B se propaga a A
-  await B.page.click('#btn-data');
+  await B.page.click('#btn-data'); await B.page.$$eval('details.fold', (ds) => ds.forEach((d) => { d.open = true; }));
   await B.page.click('#recurring-list button');
   await B.page.waitForFunction(() => /No tienes ninguno/.test(document.querySelector('#recurring-list').textContent));
   await B.page.click('#data-close');
   await B.page.waitForTimeout(2500);
   await A.reload();
-  await A.page.click('#btn-data');
+  await A.page.click('#btn-data'); await A.page.$$eval('details.fold', (ds) => ds.forEach((d) => { d.open = true; }));
   assert.match(await A.page.textContent('#recurring-list'), /No tienes ninguno/);
   await A.page.click('#data-close');
   step('quitar un recurrente se propaga');
 
   // Botones rápidos y categorías propias también viajan
-  await A.page.click('#btn-data');
+  await A.page.click('#btn-data'); await A.page.$$eval('details.fold', (ds) => ds.forEach((d) => { d.open = true; }));
   await A.page.fill('#category-add [name=emoji]', '🐶');
   await A.page.fill('#category-add [name=name]', 'Mascota');
   await A.page.click('#category-add button');

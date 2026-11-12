@@ -97,7 +97,7 @@ const server = http.createServer((req, res) => {
   step('los datos sobreviven a recargar');
 
   // Exportar JSON y CSV
-  await page.click('#btn-data');
+  await page.click('#btn-data'); await page.$$eval('details.fold', (ds) => ds.forEach((d) => { d.open = true; }));
   const [dj] = await Promise.all([page.waitForEvent('download'), page.click('#export-json')]);
   const jsonPath = await dj.path();
   const exported = JSON.parse(fs.readFileSync(jsonPath, 'utf8'));
@@ -117,7 +117,7 @@ const server = http.createServer((req, res) => {
   step('borrar');
 
   // Importar JSON restaura el borrado sin duplicar; importar CSV tampoco duplica
-  await page.click('#btn-data');
+  await page.click('#btn-data'); await page.$$eval('details.fold', (ds) => ds.forEach((d) => { d.open = true; }));
   await page.setInputFiles('#import-file', { name: 'gastos.json', mimeType: 'application/json', buffer: fs.readFileSync(jsonPath) });
   await page.waitForFunction(() => /Importados 1 nuevos y 2 actualizados/.test(document.querySelector('#data-msg').textContent));
   await page.setInputFiles('#import-file', { name: 'gastos.csv', mimeType: 'text/csv', buffer: Buffer.from(csv) });
@@ -165,7 +165,7 @@ const server = http.createServer((req, res) => {
   step('ingresos y balance');
 
   // Presupuesto: aviso al 80 % y al 100 %
-  await page.click('#btn-data');
+  await page.click('#btn-data'); await page.$$eval('details.fold', (ds) => ds.forEach((d) => { d.open = true; }));
   await page.fill('#budgets input[data-category="Comida"]', '3');
   await page.locator('#budgets input[data-category="Comida"]').blur();
   await page.waitForFunction(() => /Presupuesto de Comida/.test(document.querySelector('#data-msg').textContent));
@@ -208,7 +208,7 @@ const server = http.createServer((req, res) => {
   step('un recurrente borrado no reaparece');
 
   // Copia completa con presupuestos y recurrentes; quitar el recurrente
-  await page.click('#btn-data');
+  await page.click('#btn-data'); await page.$$eval('details.fold', (ds) => ds.forEach((d) => { d.open = true; }));
   assert.match(await text('#recurring-list'), /Netflix · 9,99 € · día 1/);
   assert.equal(await page.inputValue('#budgets input[data-category="Comida"]'), '3,00');
   const [d2] = await Promise.all([page.waitForEvent('download'), page.click('#export-json')]);

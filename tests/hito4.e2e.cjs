@@ -87,7 +87,7 @@ const server = http.createServer((req, res) => {
   await page.reload();
   assert.ok(await page.isChecked('#view input[value=business]'));
   assert.equal(await text('#month-total'), '84,00 €');
-  await page.click('#btn-data');
+  await page.click('#btn-data'); await page.$$eval('details.fold', (ds) => ds.forEach((d) => { d.open = true; }));
   assert.equal(await page.textContent('#export-csv'), 'Exportar CSV (solo agencia)');
   const [d] = await Promise.all([page.waitForEvent('download'), page.click('#export-csv')]);
   assert.match(d.suggestedFilename(), /^gastos-agencia-\d{4}-\d{2}-\d{2}\.csv$/);

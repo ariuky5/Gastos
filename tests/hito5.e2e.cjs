@@ -56,7 +56,7 @@ const server = http.createServer((req, res) => {
   step('un toque apunta el gasto y el botón sobrevive a recargar');
 
   // Categoría nueva
-  await page.click('#btn-data');
+  await page.click('#btn-data'); await page.$$eval('details.fold', (ds) => ds.forEach((d) => { d.open = true; }));
   await page.fill('#category-add [name=emoji]', '🐶');
   await page.fill('#category-add [name=name]', 'Mascota');
   await page.click('#category-add button');
@@ -91,7 +91,7 @@ const server = http.createServer((req, res) => {
   step('renombrar categoría y cambiar emoji');
 
   // Quitar categoría: los movimientos se quedan
-  await page.click('#btn-data');
+  await page.click('#btn-data'); await page.$$eval('details.fold', (ds) => ds.forEach((d) => { d.open = true; }));
   await page.click('.cat-row:has(input[value="Restaurantes"]) button');
   await page.waitForFunction(() => !document.querySelector('#categories input[value="Restaurantes"]'));
   await page.click('#data-close');
@@ -100,7 +100,7 @@ const server = http.createServer((req, res) => {
   step('quitar categoría conserva los movimientos');
 
   // Copia JSON con botones y categorías, restaurada en un navegador limpio
-  await page.click('#btn-data');
+  await page.click('#btn-data'); await page.$$eval('details.fold', (ds) => ds.forEach((d) => { d.open = true; }));
   const [d] = await Promise.all([page.waitForEvent('download'), page.click('#export-json')]);
   const backup = fs.readFileSync(await d.path());
   const parsed = JSON.parse(backup);
@@ -110,7 +110,7 @@ const server = http.createServer((req, res) => {
   const ctx2 = await browser.newContext({ ...devices['iPhone 13'], locale: 'es-ES' });
   const p2 = await ctx2.newPage();
   await p2.goto(url);
-  await p2.click('#btn-data');
+  await p2.click('#btn-data'); await p2.$$eval('details.fold', (ds) => ds.forEach((d) => { d.open = true; }));
   await p2.setInputFiles('#import-file', { name: 'gastos.json', mimeType: 'application/json', buffer: backup });
   await p2.waitForFunction(() => /Importados 2 nuevos/.test(document.querySelector('#data-msg').textContent));
   await p2.click('#data-close');

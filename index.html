@@ -10,12 +10,15 @@
   <link rel="apple-touch-icon" href="icons/icon-192.png">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="Gastos">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self' https: http://localhost:* http://127.0.0.1:*; object-src 'none'; base-uri 'none'; form-action 'self'; frame-src 'none'; worker-src 'self'; manifest-src 'self'">
+  <meta name="referrer" content="no-referrer">
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
   <header class="top">
     <h1><img src="icons/icon.svg" class="logo" alt="" width="36" height="36">Gastos</h1>
     <div class="top-actions">
+      <button id="btn-refresh" class="ghost" aria-label="Actualizar datos" title="Actualizar">↻</button>
       <button id="btn-private" class="ghost" aria-pressed="false" aria-label="Modo privado: ocultar importes" title="Ocultar importes">👁</button>
       <button id="btn-data" class="ghost">Ajustes</button>
     </div>
@@ -43,7 +46,7 @@
         <input name="date" type="date" aria-label="Fecha" required>
         <select name="method" aria-label="Método de pago"></select>
       </div>
-      <input name="note" type="text" placeholder="Nota (opcional). Usa #etiquetas" maxlength="120" aria-label="Nota">
+      <input name="note" type="text" placeholder="Nota" maxlength="120" aria-label="Nota">
       <div class="checks">
         <label class="check"><input type="checkbox" name="repeat">Repetir cada mes</label>
         <label class="check"><input type="checkbox" name="favorite">Guardar como botón rápido</label>
@@ -156,9 +159,11 @@
   <dialog id="data-dialog">
     <h2>Ajustes</h2>
 
-    <h3>Presupuesto mensual por categoría</h3>
-    <p class="hint">Deja el campo vacío si no quieres límite. Te aviso al llegar al 80 % y al 100 %.</p>
-    <div id="budgets" class="budgets"></div>
+    <details class="fold">
+      <summary>Presupuesto mensual por categoría</summary>
+      <p class="hint">Deja el campo vacío si no quieres límite. Te aviso al llegar al 80 % y al 100 %.</p>
+      <div id="budgets" class="budgets"></div>
+    </details>
 
     <h3>Recurrentes</h3>
     <ul id="recurring-list" class="recurring"></ul>
@@ -166,7 +171,8 @@
     <h3>Botones rápidos</h3>
     <ul id="favorites-list" class="recurring"></ul>
 
-    <h3>Categorías</h3>
+    <details class="fold">
+    <summary>Categorías</summary>
     <p class="hint">Cambia el emoji o el nombre y se guarda solo. Al renombrar, los movimientos que ya tenías pasan al nombre nuevo.</p>
     <div id="categories" class="cats"></div>
     <form id="category-add" class="cat-row" autocomplete="off">
@@ -175,6 +181,7 @@
       <select name="type" aria-label="Tipo"><option value="expense">Gasto</option><option value="income">Ingreso</option></select>
       <button type="submit">Añadir</button>
     </form>
+    </details>
 
     <h3>Grupos</h3>
     <p class="hint">Un viaje, un proyecto o un cliente. Lo que apuntes en un grupo cuenta también en Personal o en Agencia. Quitar un grupo no borra sus movimientos.</p>
@@ -183,12 +190,22 @@
     <h3>Sincronización entre dispositivos</h3>
     <p class="hint">Opcional. Pon la URL del webhook de n8n y la misma clave en todos tus dispositivos. Déjalo vacío para no sincronizar.</p>
     <label>URL del webhook<input id="sync-url" type="url" inputmode="url" placeholder="https://…/webhook/gastos-sync" autocapitalize="off" autocomplete="off" spellcheck="false"></label>
-    <label>Clave<input id="sync-key" type="text" autocapitalize="off" autocomplete="off" spellcheck="false"></label>
+    <label>Clave<input id="sync-key" type="password" autocapitalize="off" autocomplete="off" spellcheck="false"></label>
     <div class="stack">
       <button id="sync-save" class="primary">Guardar y sincronizar</button>
       <button id="sync-generate">Generar clave nueva</button>
     </div>
     <p id="sync-msg" class="msg" role="status" aria-live="polite"></p>
+
+    <h3>Bloqueo con PIN</h3>
+    <p class="hint">Pide un PIN al abrir la app y al volver tras 1 minuto fuera. Va por dispositivo. Si lo olvidas, borra los datos del sitio en el navegador (si sincronizas, se recuperan desde n8n).</p>
+    <form id="pin-form" class="stack" autocomplete="off">
+      <label>PIN nuevo (4 a 8 cifras)<input name="pin" type="password" inputmode="numeric" pattern="[0-9]{4,8}" maxlength="8" required></label>
+      <label>Repite el PIN<input name="pin2" type="password" inputmode="numeric" pattern="[0-9]{4,8}" maxlength="8" required></label>
+      <button type="submit" class="primary" id="pin-save">Activar PIN</button>
+      <button type="button" id="pin-remove" hidden>Quitar PIN</button>
+    </form>
+    <p id="pin-msg" class="msg" role="status" aria-live="polite"></p>
 
     <h3>Copia de seguridad</h3>
     <p class="hint">Tus datos se guardan solo en este dispositivo. Exporta una copia de vez en cuando.</p>
@@ -201,6 +218,17 @@
     <p id="data-msg" class="msg" role="status" aria-live="polite"></p>
     <div class="actions"><span class="spacer"></span><button id="data-close" class="ghost">Cerrar</button></div>
   </dialog>
+
+  <!-- Pantalla de bloqueo -->
+  <div id="lock" class="lock" hidden>
+    <form id="lock-form" class="lock-box" autocomplete="off">
+      <img src="icons/icon.svg" alt="" width="56" height="56">
+      <h2>Gastos bloqueado</h2>
+      <input name="pin" type="password" inputmode="numeric" maxlength="8" aria-label="PIN" placeholder="PIN" required>
+      <button type="submit" class="primary">Desbloquear</button>
+      <p id="lock-msg" class="msg" role="status" aria-live="polite"></p>
+    </form>
+  </div>
 
   <script type="module" src="app.js"></script>
 </body>

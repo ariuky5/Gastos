@@ -261,3 +261,22 @@ body.private .chart svg text[text-anchor="middle"] { filter: none; }
 #add-group { min-height: 38px; }
 .group-row { grid-template-columns: 52px minmax(0, 1fr); margin-bottom: 10px; }
 #group-form .seg { margin-top: 4px; }
+
+/* ---- Actualizar, desplegables de ajustes y bloqueo con PIN ---- */
+#btn-refresh { min-width: 44px; padding: 0 10px; font-size: 18px; }
+#btn-refresh.spinning { animation: spin 0.8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { #btn-refresh.spinning { animation: none; opacity: .6; } }
+details.fold { border-bottom: 1px solid var(--line, rgba(127,127,127,.25)); margin-top: 12px; padding-bottom: 6px; }
+details.fold > summary { font-size: 15px; font-weight: 600; cursor: pointer; min-height: 40px; display: flex; align-items: center; justify-content: space-between; list-style: none; }
+details.fold > summary::-webkit-details-marker { display: none; }
+details.fold > summary::after { content: '▾'; color: var(--muted); transition: transform .15s; }
+details.fold[open] > summary::after { transform: rotate(180deg); }
+#pin-form label { margin-bottom: 0; }
+body.locked > header, body.locked > main, body.locked > footer, body.locked .watermark { visibility: hidden; }
+.lock { position: fixed; inset: 0; z-index: 1000; display: grid; place-items: center; background: var(--bg); padding: 16px; }
+.lock[hidden] { display: none; }
+.lock-box { display: grid; gap: 12px; justify-items: center; width: min(320px, 100%); text-align: center; }
+.lock-box img { border-radius: 12px; }
+.lock-box input { width: 100%; text-align: center; font-size: 22px; letter-spacing: 6px; }
+.lock-box button { width: 100%; }
