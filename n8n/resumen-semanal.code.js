@@ -1,5 +1,5 @@
 // Nodo Code de n8n (Run Once for All Items). Entrada: todas las filas de la tabla gastos_sync.
-// Salida: un único item { subject, html, hasData } con el resumen de la semana anterior (lunes a domingo).
+// Salida: un único item { subject, html, hasData } con el resumen de la semana (ver fechas abajo).
 const APP_URL = 'https://ariuky5.github.io/Gastos/';
 const TZ = 'Europe/Madrid';
 
@@ -9,8 +9,12 @@ const todayISO = (() => {
   catch (e) { return new Date().toISOString().slice(0, 10); }
 })();
 const addDays = (iso, n) => { const d = new Date(iso + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
-const weekEnd = addDays(todayISO, -1);
-const weekStart = addDays(todayISO, -7);
+// El lunes (envío automático) resume la semana pasada de lunes a domingo.
+// Cualquier otro día (ejecución a mano) resume la semana en curso, de lunes a hoy.
+const weekday = (new Date(todayISO + 'T12:00:00Z').getUTCDay() + 6) % 7; // 0 = lunes
+const isMonday = weekday === 0;
+const weekStart = isMonday ? addDays(todayISO, -7) : addDays(todayISO, -weekday);
+const weekEnd = isMonday ? addDays(todayISO, -1) : todayISO;
 const month = weekEnd.slice(0, 7);
 const MONTHS = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
 const dayMonth = (iso) => `${Number(iso.slice(8))} de ${MONTHS[Number(iso.slice(5, 7)) - 1]}`;
@@ -148,7 +152,7 @@ const html = `<!doctype html><html lang="es"><head><meta charset="utf-8"><meta n
       <a href="${APP_URL}" style="display:inline-block;background:${C.accent};color:#ffffff;text-decoration:none;font:600 15px ${FONT};padding:13px 26px;border-radius:10px">Abrir la app</a>
     </td></tr>
     <tr><td align="center" style="padding:24px 32px 28px;font:400 12px/1.5 ${FONT};color:${C.muted}">
-      Resumen automático de los lunes, enviado desde tu n8n.<br><span style="letter-spacing:.1em;font-weight:600">uky_system</span>
+      <span style="letter-spacing:.1em;font-weight:600">uky_system</span>
     </td></tr>
   </table>
 </td></tr></table>

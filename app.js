@@ -3,7 +3,7 @@ import * as sync from './sync.js';
 import {
   METHODS, categoriesFor, emojiFor, formatCents, centsToInput, parseAmount, todayISO, shiftMonth, monthLabel, dayLabel,
   summarize, budgetRows, normalizeExpense, normalizeRecurring, dueRecurring, toCSV, fromCSV, toJSON, fromJSON,
-  setCategories, getCategories, normalizeCategories, normalizeFavorites, scopeOf, scopeLabel, inScope, tagsOf, filterExpenses, sortNewestFirst, monthlySeries, niceMax, shortMonth,
+  setCategories, getCategories, normalizeCategories, normalizeFavorites, normalizeGroups, scopeOf, scopeLabel, inScope, tagsOf, filterExpenses, sortNewestFirst, monthlySeries, niceMax, shortMonth,
 } from './lib.js';
 
 const $ = (sel) => document.querySelector(sel);
@@ -17,12 +17,18 @@ const el = (tag, props = {}, ...children) => {
 const state = {
   all: [], expenses: [], recurringAll: [], recurring: [], budgets: {}, budgetsMeta: { updatedAt: '', dirty: false },
   // Ajustes sincronizables que se guardan enteros: botones rápidos y categorías.
-  meta: { favorites: { value: [], updatedAt: '', dirty: false }, categories: { value: null, updatedAt: '', dirty: false } },
+  meta: {
+    favorites: { value: [], updatedAt: '', dirty: false }, categories: { value: null, updatedAt: '', dirty: false },
+    groups: { value: [], updatedAt: '', dirty: false },
+  },
   month: todayISO().slice(0, 7), editingId: null,
-  view: '', // '' = todo, 'personal' o 'business' (agencia)
+  view: '', // '' = todo, 'personal', 'business' (agencia) o 'g:<id>' (un grupo)
 };
 /** Movimientos vivos del ámbito que se está viendo. Resumen, gráfico, lista y CSV salen de aquí. */
 const visible = () => inScope(state.expenses, state.view);
+const groupById = (id) => state.meta.groups.value.find((g) => g.id === id);
+const viewGroup = () => (state.view.startsWith('g:') ? groupById(state.view.slice(2)) : null);
+const viewLabel = () => { const g = viewGroup(); return g ? g.name : scopeLabel(state.view); };
 const prefs = {
   get(key, fallback) { try { return localStorage.getItem('gastos.' + key) || fallback; } catch { return fallback; } },
   set(key, value) { try { localStorage.setItem('gastos.' + key, value); } catch { /* sin almacenamiento: no pasa nada */ } },
@@ -62,6 +68,7 @@ async function saveMeta(key, value, updatedAt = nowISO(), dirty = true) {
   state.meta[key] = { value, updatedAt, dirty };
   await db.setMeta('m:' + key, state.meta[key]);
   if (key === 'categories') setCategories(value);
+  if (key === 'groups') renderGroups();
 }
 const tombstone = (id) => ({ id, deleted: true, updatedAt: nowISO() });
 
@@ -101,7 +108,7 @@ function resetAddForm() {
   addForm.repeat.checked = false;
   addForm.favorite.checked = false;
   addForm.type.value = 'expense'; // lo habitual es apuntar gastos
-  addForm.scope.value = state.view || 'personal'; // si estás viendo la agencia, lo normal es apuntar ahí
+  setAddGroup(); // apunta en lo que estés viendo: la agencia, un grupo...
   addForm.date.value = todayISO();
   addForm.method.value = prefs.get('method', METHODS[0]);
   renderAddCategories();
@@ -110,8 +117,98 @@ function resetAddForm() {
 addForm.addEventListener('change', (ev) => {
   if (ev.target.name === 'type') renderAddCategories();
   // Elegir la categoría «Agencia» marca el movimiento como de la agencia.
-  if (ev.target.name === 'category' && ev.target.value === 'Agencia') addForm.scope.value = 'business';
+  if (ev.target.name === 'category' && ev.target.value === 'Agencia' && !addForm.group.value) addForm.scope.value = 'business';
+  // Un grupo vive dentro de Personal o de Agencia: el ámbito sigue al grupo.
+  if (ev.target.name === 'group' && groupById(addForm.group.value)) addForm.scope.value = groupById(addForm.group.value).scope;
+  if (ev.target.name === 'scope' && groupById(addForm.group.value) && groupById(addForm.group.value).scope !== ev.target.value) addForm.group.value = '';
 });
+
+/** Deja el alta apuntando a lo que se está viendo (un grupo, la agencia o personal). */
+function setAddGroup() {
+  const g = viewGroup();
+  addForm.group.value = g ? g.id : '';
+  addForm.scope.value = g ? g.scope : state.view === 'business' ? 'business' : 'personal';
+}
+
+// ---------- Grupos (un viaje, un proyecto...) ----------
+const groupOptions = (select, current) => {
+  const groups = state.meta.groups.value;
+  select.replaceChildren(el('option', { value: '', textContent: 'Sin grupo' }),
+    ...groups.map((g) => el('option', { value: g.id, textContent: `${g.emoji} ${g.name} · ${scopeLabel(g.scope)}` })));
+  select.value = current && groupById(current) ? current : '';
+};
+
+function renderGroups() {
+  const groups = state.meta.groups.value;
+  if (state.view.startsWith('g:') && !viewGroup()) { state.view = ''; prefs.set('view', 'all'); }
+  const view = $('#view');
+  view.querySelectorAll('.grp').forEach((n) => n.remove());
+  const plus = $('#group-new');
+  for (const g of groups) {
+    const label = el('label', { className: 'grp' }, el('input', { type: 'radio', name: 'view', value: 'g:' + g.id }), `${g.emoji} ${g.name}`);
+    view.insertBefore(label, plus);
+  }
+  const current = view.querySelector(`input[value="${state.view}"]`);
+  if (current) current.checked = true;
+  const typed = addForm.group.value;
+  groupOptions(addForm.group, typed);
+  addForm.group.hidden = !groups.length;
+  if (state.editingId) groupOptions(editForm.group, editForm.group.value);
+  $('#edit-group').hidden = !groups.length;
+  const list = $('#groups-list');
+  if (!groups.length) {
+    list.replaceChildren(el('li', { className: 'empty', textContent: 'No tienes ninguno. Créalos con el botón + junto a Todo, Personal y Agencia.' }));
+    return;
+  }
+  list.replaceChildren(...groups.map((g) => {
+    const n = state.expenses.filter((e) => e.group === g.id).length;
+    const btn = el('button', { type: 'button', className: 'danger', textContent: 'Quitar' });
+    btn.dataset.id = g.id;
+    return el('li', {}, el('span', { textContent: `${g.emoji} ${g.name} · ${scopeLabel(g.scope)} · ${n} ${n === 1 ? 'movimiento' : 'movimientos'}` }), btn);
+  }));
+}
+
+const groupDialog = $('#group-dialog');
+const groupForm = $('#group-form');
+$('#group-new').addEventListener('click', () => {
+  groupForm.reset();
+  groupForm.scope.value = state.view === 'business' ? 'business' : 'personal';
+  showMsg($('#group-msg'), '');
+  groupDialog.showModal();
+  groupForm.name.focus();
+});
+$('#group-cancel').addEventListener('click', () => groupDialog.close());
+groupForm.addEventListener('submit', async (ev) => {
+  ev.preventDefault();
+  const name = groupForm.name.value.trim();
+  if (!name) return showMsg($('#group-msg'), 'Ponle un nombre.', true);
+  if (state.meta.groups.value.some((g) => g.name.toLowerCase() === name.toLowerCase())) return showMsg($('#group-msg'), `Ya tienes un grupo «${name}».`, true);
+  const group = normalizeGroups([{ name, emoji: groupForm.emoji.value, scope: groupForm.scope.value }])[0];
+  await saveMeta('groups', [...state.meta.groups.value, group]);
+  groupDialog.close();
+  state.view = 'g:' + group.id; // se abre la pestaña nueva
+  prefs.set('view', state.view);
+  renderGroups();
+  setAddGroup();
+  render();
+  queueSync();
+});
+
+$('#groups-list').addEventListener('click', async (ev) => {
+  const id = ev.target.dataset && ev.target.dataset.id;
+  const g = id && groupById(id);
+  if (!g || !confirm(`¿Quitar el grupo «${g.name}»? Sus movimientos se quedan en ${scopeLabel(g.scope)}.`)) return;
+  await saveMeta('groups', state.meta.groups.value.filter((x) => x.id !== id));
+  setAddGroup();
+  render();
+  queueSync();
+});
+
+/** Ámbito y grupo de un movimiento: si va en un grupo, el ámbito es el del grupo. */
+function groupFields(groupId, scope) {
+  const g = groupById(groupId);
+  return g ? { scope: g.scope, group: g.id } : { scope, group: undefined };
+}
 
 function showMsg(node, text, isError = false) {
   node.textContent = text;
@@ -132,7 +229,8 @@ addForm.addEventListener('submit', async (ev) => {
   let expense;
   try {
     expense = normalizeExpense({
-      type: addForm.type.value, scope: addForm.scope.value, amount: addForm.amount.value,
+      type: addForm.type.value, amount: addForm.amount.value,
+      ...groupFields(addForm.group.value, addForm.scope.value),
       category: addForm.querySelector('[name=category]:checked').value,
       date: addForm.date.value, method: addForm.method.value, note: addForm.note.value,
     });
@@ -396,6 +494,8 @@ function openEdit(id) {
   state.editingId = id;
   editForm.type.value = e.type === 'income' ? 'income' : 'expense';
   editForm.scope.value = scopeOf(e);
+  groupOptions(editForm.group, e.group);
+  $('#edit-group').hidden = !state.meta.groups.value.length;
   fillEditCategories(editForm.type.value, e.category);
   fillSelect(editForm.method, METHODS.includes(e.method) ? METHODS : [...METHODS, e.method]);
   editForm.amount.value = centsToInput(e.amount);
@@ -407,6 +507,8 @@ function openEdit(id) {
 }
 
 editForm.type.addEventListener('change', () => fillEditCategories(editForm.type.value));
+editForm.group.addEventListener('change', () => { const g = groupById(editForm.group.value); if (g) editForm.scope.value = g.scope; });
+editForm.scope.addEventListener('change', () => { const g = groupById(editForm.group.value); if (g && g.scope !== editForm.scope.value) editForm.group.value = ''; });
 
 editForm.addEventListener('submit', async (ev) => {
   ev.preventDefault();
@@ -415,7 +517,7 @@ editForm.addEventListener('submit', async (ev) => {
   let updated;
   try {
     updated = normalizeExpense({
-      ...original, type: editForm.type.value, scope: editForm.scope.value, amount: editForm.amount.value, category: editForm.category.value,
+      ...original, type: editForm.type.value, ...groupFields(editForm.group.value, editForm.scope.value), amount: editForm.amount.value, category: editForm.category.value,
       date: editForm.date.value, method: editForm.method.value, note: editForm.note.value,
       updatedAt: new Date().toISOString(),
     });
@@ -599,7 +701,8 @@ function renderList(monthItems) {
     const isIncome = e.type === 'income';
     const details = [
       e.note ? e.category : null, e.method, e.recurringId ? 'recurrente' : null,
-      scopeOf(e) === 'business' && state.view !== 'business' ? 'agencia' : null,
+      scopeOf(e) === 'business' && state.view !== 'business' && !(viewGroup() && e.group === viewGroup().id) ? 'agencia' : null,
+      e.group && groupById(e.group) && state.view !== 'g:' + e.group ? `${groupById(e.group).emoji} ${groupById(e.group).name}` : null,
     ].filter(Boolean).join(' · ');
     const amountText = (isIncome ? '+' : '') + formatCents(e.amount);
     const row = el('button', { className: 'item', type: 'button' },
@@ -615,9 +718,10 @@ function renderList(monthItems) {
 
 // ---------- Vista: todo, personal o agencia ----------
 $('#view').addEventListener('change', (ev) => {
+  if (ev.target.name !== 'view') return;
   state.view = ev.target.value;
   prefs.set('view', state.view || 'all');
-  addForm.scope.value = state.view || 'personal';
+  setAddGroup();
   render();
 });
 
@@ -664,13 +768,14 @@ $('#btn-data').addEventListener('click', () => {
   const cfg = sync.getConfig();
   $('#sync-url').value = cfg.url;
   $('#sync-key').value = cfg.key;
-  $('#export-csv').textContent = state.view ? `Exportar CSV (solo ${scopeLabel(state.view).toLowerCase()})` : 'Exportar CSV (Excel / Sheets)';
+  $('#export-csv').textContent = state.view ? `Exportar CSV (solo ${viewGroup() ? viewLabel() : viewLabel().toLowerCase()})` : 'Exportar CSV (Excel / Sheets)';
+  renderGroups();
   showMsg($('#data-msg'), `${state.expenses.length} movimientos guardados en este dispositivo.`);
   dataDialog.showModal();
 });
 $('#data-close').addEventListener('click', () => dataDialog.close());
-$('#export-json').addEventListener('click', () => download(`gastos-${todayISO()}.json`, toJSON(state.expenses, state.budgets, state.recurring, { favorites: state.meta.favorites.value, categories: state.meta.categories.value }), 'application/json'));
-$('#export-csv').addEventListener('click', () => download(`gastos-${state.view === 'business' ? 'agencia-' : state.view === 'personal' ? 'personal-' : ''}${todayISO()}.csv`, toCSV(visible()), 'text/csv;charset=utf-8'));
+$('#export-json').addEventListener('click', () => download(`gastos-${todayISO()}.json`, toJSON(state.expenses, state.budgets, state.recurring, { favorites: state.meta.favorites.value, categories: state.meta.categories.value, groups: state.meta.groups.value }), 'application/json'));
+$('#export-csv').addEventListener('click', () => download(`gastos-${state.view ? viewLabel().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '-') + '-' : ''}${todayISO()}.csv`, toCSV(visible()), 'text/csv;charset=utf-8'));
 $('#import-btn').addEventListener('click', () => $('#import-file').click());
 
 $('#import-file').addEventListener('change', async (ev) => {
@@ -680,8 +785,8 @@ $('#import-file').addEventListener('change', async (ev) => {
   const msg = $('#data-msg');
   const text = await file.text();
   const isJSON = file.name.toLowerCase().endsWith('.json') || /^\s*[\[{]/.test(text);
-  const { expenses, errors, budgets = {}, recurring = [], favorites = [], categories = null } = isJSON ? fromJSON(text) : fromCSV(text);
-  if (!expenses.length && !recurring.length && !Object.keys(budgets).length && !favorites.length && !categories) {
+  const { expenses, errors, budgets = {}, recurring = [], favorites = [], categories = null, groups = [] } = isJSON ? fromJSON(text) : fromCSV(text);
+  if (!expenses.length && !recurring.length && !Object.keys(budgets).length && !favorites.length && !categories && !groups.length) {
     return showMsg(msg, errors[0] || 'No se ha encontrado ningún movimiento en el archivo.', true);
   }
   // Fusión por id: lo importado sustituye a lo que tenga el mismo id; el resto se añade.
@@ -702,6 +807,10 @@ $('#import-file').addEventListener('change', async (ev) => {
   }
   if (recurring.length) await generateDue();
   if (categories) await saveMeta('categories', categories);
+  if (groups.length) {
+    const mine = new Set(state.meta.groups.value.map((g) => g.id));
+    await saveMeta('groups', normalizeGroups([...state.meta.groups.value, ...groups.filter((g) => !mine.has(g.id))]));
+  }
   if (favorites.length) {
     const mine = new Set(state.meta.favorites.value.map((f) => f.id));
     await saveMeta('favorites', [...state.meta.favorites.value, ...favorites.filter((f) => !mine.has(f.id))]);
@@ -815,16 +924,18 @@ document.addEventListener('visibilitychange', () => { if (document.visibilitySta
 
 // ---------- Arranque ----------
 async function start() {
-  const savedView = prefs.get('view', 'all');
-  state.view = savedView === 'personal' || savedView === 'business' ? savedView : '';
-  document.querySelector(`#view input[value="${state.view}"]`).checked = true;
   setPrivate(prefs.get('private', 'off') === 'on');
   try {
-    // Las categorías van primero: el formulario de alta las necesita.
-    const [favorites, categories] = await Promise.all([db.getMeta('m:favorites', null), db.getMeta('m:categories', null)]);
+    // Las categorías y los grupos van primero: el formulario de alta los necesita.
+    const [favorites, categories, groups] = await Promise.all([db.getMeta('m:favorites', null), db.getMeta('m:categories', null), db.getMeta('m:groups', null)]);
     if (favorites) state.meta.favorites = favorites;
     if (categories) { state.meta.categories = categories; setCategories(categories.value); }
+    if (groups) state.meta.groups = groups;
   } catch { /* el aviso de almacenamiento sale más abajo */ }
+  const savedView = prefs.get('view', 'all');
+  state.view = savedView === 'personal' || savedView === 'business' || savedView.startsWith('g:') ? savedView : '';
+  renderGroups(); // pinta las pestañas de los grupos y marca la vista guardada (si el grupo ya no existe, vuelve a Todo)
+  if (!state.view) document.querySelector('#view input[value=""]').checked = true;
   setupForms();
   renderFavorites();
   let created = 0;

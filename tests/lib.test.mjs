@@ -264,3 +264,24 @@ test('botones rápidos: valida y viajan por sincronización y copia JSON', () =>
   assert.deepEqual(back.categories, cats);
   assert.equal(fromJSON(toJSON([])).categories, null);
 });
+
+test('grupos: cuentan en su ámbito y viajan por sincronización y copia JSON', async () => {
+  const { normalizeGroups, inScope } = await import('../lib.js');
+  const groups = normalizeGroups([{ name: 'Viaje Roma', emoji: '✈️', scope: 'personal' }, { name: 'viaje roma' }, { name: '' }, { name: 'Cliente X', scope: 'business' }]);
+  assert.equal(groups.length, 2);
+  assert.equal(groups[1].scope, 'business');
+  const [roma] = groups;
+  const list = [
+    normalizeExpense({ amount: '50', date: '2026-11-10', category: 'Ocio', scope: roma.scope, group: roma.id }),
+    normalizeExpense({ amount: '10', date: '2026-11-10', category: 'Comida' }),
+    normalizeExpense({ amount: '99', date: '2026-11-10', category: 'Agencia', scope: 'business' }),
+  ];
+  assert.equal(list[0].group, roma.id);
+  assert.equal(list[1].group, undefined);
+  assert.equal(inScope(list, 'g:' + roma.id).length, 1);
+  assert.equal(inScope(list, 'personal').length, 2); // el gasto del viaje cuenta también en Personal
+  assert.equal(inScope(list, 'business').length, 1);
+  assert.equal(inScope(list, '').length, 3);
+  assert.deepEqual(fromRow(toRow('meta:groups', { value: groups, updatedAt: 'x' })).record.value, groups);
+  assert.deepEqual(fromJSON(toJSON([], {}, [], { groups })).groups, groups);
+});

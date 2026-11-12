@@ -208,7 +208,7 @@ dialog h3 { font-size: 15px; margin: 20px 0 6px; }
     align-items: start; gap: 16px;
   }
   #add-form { grid-area: add; position: sticky; top: 16px; }
-  #view { grid-area: view; max-width: 420px; }
+  #view { grid-area: view; max-width: 100%; justify-self: start; }
   .card-summary { grid-area: summary; }
   .card-chart { grid-area: chart; }
   .card-list { grid-area: list; }
@@ -252,3 +252,12 @@ body.private :is(#month-total, #month-income, #month-balance, .amt, .day span:la
   filter: blur(7px); user-select: none;
 }
 body.private .chart svg text[text-anchor="middle"] { filter: none; }
+
+/* Pestañas de vista: Todo, Personal, Agencia, grupos y el botón + (bajan de línea si no caben) */
+.seg.views { display: flex; flex-wrap: wrap; gap: 2px; }
+.seg.views label { flex: 1 0 auto; white-space: nowrap; padding: 8px 12px; }
+.seg.views .add-group { flex: 0 0 auto; min-width: 40px; min-height: 38px; padding: 0 10px; border: 0; background: transparent; font-size: 20px; line-height: 1; color: var(--accent); border-radius: 8px; cursor: pointer; }
+.seg.views .add-group:hover { background: var(--card); }
+#add-group { min-height: 38px; }
+.group-row { grid-template-columns: 52px minmax(0, 1fr); margin-bottom: 10px; }
+#group-form .seg { margin-top: 4px; }

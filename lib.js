@@ -21,8 +21,31 @@ export const METHODS = ['Tarjeta', 'Efectivo', 'Bizum', 'Transferencia'];
 // Ámbito de un movimiento: 'personal' (por defecto) o 'business' (la agencia).
 export const scopeOf = (e) => (e.scope === 'business' ? 'business' : 'personal');
 export const scopeLabel = (scope) => (scope === 'business' ? 'Agencia' : scope === 'personal' ? 'Personal' : 'Todo');
-/** Movimientos de un ámbito; con '' devuelve todos. */
-export const inScope = (expenses, scope) => (scope ? expenses.filter((e) => scopeOf(e) === scope) : expenses);
+/**
+ * Movimientos de lo que se está viendo: '' todos, 'personal', 'business' o 'g:<id>' (un grupo).
+ * Un movimiento de un grupo cuenta también en el ámbito del grupo (Personal o Agencia).
+ */
+export const inScope = (expenses, view) => {
+  if (!view) return expenses;
+  if (view.startsWith('g:')) { const id = view.slice(2); return expenses.filter((e) => e.group === id); }
+  return expenses.filter((e) => scopeOf(e) === view);
+};
+
+/** Limpia la lista de grupos { id, name, emoji, scope }: un viaje, un proyecto... dentro de Personal o Agencia. */
+export function normalizeGroups(raw) {
+  const out = [];
+  const seen = new Set();
+  for (const g of Array.isArray(raw) ? raw : []) {
+    const name = String((g && g.name) || '').trim().slice(0, 24);
+    if (!name || seen.has(name.toLowerCase())) continue;
+    seen.add(name.toLowerCase());
+    out.push({
+      id: String(g.id || crypto.randomUUID()), name, scope: scopeOf(g),
+      emoji: [...String(g.emoji || '').trim()].slice(0, 4).join('') || '📁',
+    });
+  }
+  return out;
+}
 
 // ---------- Categorías (editables) ----------
 const DEFAULT_CATEGORIES = [
@@ -288,6 +311,7 @@ export function normalizeExpense(raw) {
     updatedAt: raw.updatedAt || now,
   };
   if (raw.recurringId) expense.recurringId = String(raw.recurringId);
+  if (raw.group) expense.group = String(raw.group);
   return expense;
 }
 
@@ -355,7 +379,7 @@ export const toJSON = (expenses, budgets = {}, recurring = [], extra = {}) =>
   JSON.stringify({
     app: 'gastos', version: 3, exportedAt: new Date().toISOString(),
     expenses: expenses.map(clean), budgets, recurring: recurring.map(clean),
-    favorites: extra.favorites || [], categories: extra.categories || null,
+    favorites: extra.favorites || [], categories: extra.categories || null, groups: extra.groups || [],
   }, null, 2);
 
 export function fromJSON(text) {
@@ -375,13 +399,14 @@ export function fromJSON(text) {
     expenses, budgets: normalizeBudgets(data.budgets), recurring, errors,
     favorites: normalizeFavorites(data.favorites),
     categories: Array.isArray(data.categories) && data.categories.length ? normalizeCategories(data.categories) : null,
+    groups: normalizeGroups(data.groups),
   };
 }
 
 // ---------- Sincronización ----------
 // Cada cosa sincronizable viaja como una fila { id, data, updatedAt, deleted }.
 // Ids: el del movimiento tal cual, "rec:<id>" para recurrentes y "meta:<clave>" para presupuestos,
-// botones rápidos (favorites) y categorías.
+// botones rápidos (favorites), categorías y grupos.
 // Regla de conflicto: gana la versión con "updatedAt" más reciente.
 
 /** Quita los campos internos que no deben salir del dispositivo. */
@@ -408,14 +433,14 @@ export const remoteWins = (row, local) => !local || String(row.updatedAt) > Stri
 export function fromRow(row) {
   if (!row || typeof row.id !== 'string' || typeof row.updatedAt !== 'string') return null;
   const metaKey = row.id.startsWith('meta:') ? row.id.slice(5) : '';
-  const kind = metaKey === 'budgets' ? 'budgets' : metaKey === 'favorites' || metaKey === 'categories' ? 'meta'
+  const kind = metaKey === 'budgets' ? 'budgets' : metaKey === 'favorites' || metaKey === 'categories' || metaKey === 'groups' ? 'meta'
     : metaKey ? null : row.id.startsWith('rec:') ? 'recurring' : 'expense';
   if (!kind) return null;
   if (kind === 'meta') {
     if (row.deleted) return null;
     try {
       const data = JSON.parse(row.data);
-      const value = metaKey === 'favorites' ? normalizeFavorites(data.value) : normalizeCategories(data.value);
+      const value = metaKey === 'favorites' ? normalizeFavorites(data.value) : metaKey === 'groups' ? normalizeGroups(data.value) : normalizeCategories(data.value);
       return { kind, record: { key: metaKey, value, updatedAt: row.updatedAt, dirty: false } };
     } catch { return null; }
   }

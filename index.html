@@ -38,6 +38,7 @@
         <label><input type="radio" name="scope" value="personal" checked>Personal</label>
         <label><input type="radio" name="scope" value="business">Agencia</label>
       </div>
+      <select name="group" id="add-group" aria-label="Grupo" hidden></select>
       <div class="row">
         <input name="date" type="date" aria-label="Fecha" required>
         <select name="method" aria-label="Método de pago"></select>
@@ -52,10 +53,11 @@
     </form>
 
     <!-- Resumen del mes -->
-    <div id="view" class="seg three" role="radiogroup" aria-label="Qué movimientos ver">
+    <div id="view" class="seg views" role="radiogroup" aria-label="Qué movimientos ver">
       <label><input type="radio" name="view" value="" checked>Todo</label>
       <label><input type="radio" name="view" value="personal">Personal</label>
       <label><input type="radio" name="view" value="business">Agencia</label>
+      <button type="button" id="group-new" class="add-group" aria-label="Crear grupo nuevo (un viaje, un proyecto…)" title="Crear grupo">+</button>
     </div>
 
     <section class="card card-summary">
@@ -114,6 +116,7 @@
       <label>Ámbito<select name="scope"><option value="personal">Personal</option><option value="business">Agencia</option></select></label>
       <label>Importe (€)<input name="amount" inputmode="decimal" required></label>
       <label>Categoría<select name="category"></select></label>
+      <label id="edit-group">Grupo<select name="group"></select></label>
       <label>Fecha<input name="date" type="date" required></label>
       <label>Método de pago<select name="method"></select></label>
       <label>Nota<input name="note" type="text" maxlength="120"></label>
@@ -123,6 +126,28 @@
         <span class="spacer"></span>
         <button type="button" id="edit-cancel" class="ghost">Cancelar</button>
         <button type="submit" class="primary">Guardar</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Grupo nuevo -->
+  <dialog id="group-dialog">
+    <form id="group-form" method="dialog" autocomplete="off" novalidate>
+      <h2>Grupo nuevo</h2>
+      <p class="hint">Por ejemplo «Viaje a Roma». Tendrá su pestaña y sus gastos contarán también en el lado que elijas.</p>
+      <div class="cat-row group-row">
+        <input name="emoji" aria-label="Emoji del grupo" placeholder="✈️" maxlength="8">
+        <input name="name" aria-label="Nombre del grupo" placeholder="Nombre" maxlength="24" required>
+      </div>
+      <div class="seg small" role="radiogroup" aria-label="Dentro de">
+        <label><input type="radio" name="scope" value="personal" checked>Personal</label>
+        <label><input type="radio" name="scope" value="business">Agencia</label>
+      </div>
+      <p id="group-msg" class="msg" role="status"></p>
+      <div class="actions">
+        <span class="spacer"></span>
+        <button type="button" id="group-cancel" class="ghost">Cancelar</button>
+        <button type="submit" class="primary">Crear</button>
       </div>
     </form>
   </dialog>
@@ -150,6 +175,10 @@
       <select name="type" aria-label="Tipo"><option value="expense">Gasto</option><option value="income">Ingreso</option></select>
       <button type="submit">Añadir</button>
     </form>
+
+    <h3>Grupos</h3>
+    <p class="hint">Un viaje, un proyecto o un cliente. Lo que apuntes en un grupo cuenta también en Personal o en Agencia. Quitar un grupo no borra sus movimientos.</p>
+    <ul id="groups-list" class="recurring"></ul>
 
     <h3>Sincronización entre dispositivos</h3>
     <p class="hint">Opcional. Pon la URL del webhook de n8n y la misma clave en todos tus dispositivos. Déjalo vacío para no sincronizar.</p>
