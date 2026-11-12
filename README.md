@@ -31,3 +31,7 @@ Contrato del webhook (POST, JSON, cabecera `X-Gastos-Key`):
 
 - `{ "action": "pull", "since": <cursor> }` → `{ "ok": true, "cursor": <número>, "rows": [...] }`
 - `{ "action": "push", "rows": [{ "id", "data", "updatedAt", "deleted" }] }` → `{ "ok": true }`
+
+## Resumen semanal por email
+
+El flujo de n8n «Gastos - Resumen semanal» lee la tabla `gastos_sync` cada lunes a las 9:00 (Europe/Madrid) y envía por Gmail el resumen de los 7 días anteriores. El código del nodo «Montar resumen» está en `n8n/resumen-semanal.code.js`. Solo cuenta lo que ya se ha sincronizado con n8n.
