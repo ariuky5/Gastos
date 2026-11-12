@@ -3,7 +3,7 @@ import * as sync from './sync.js';
 import {
   METHODS, categoriesFor, emojiFor, formatCents, centsToInput, parseAmount, todayISO, shiftMonth, monthLabel, dayLabel,
   summarize, budgetRows, normalizeExpense, normalizeRecurring, dueRecurring, toCSV, fromCSV, toJSON, fromJSON,
-  CATEGORIES, scopeOf, scopeLabel, inScope, tagsOf, filterExpenses, sortNewestFirst, monthlySeries, niceMax, shortMonth,
+  setCategories, getCategories, normalizeCategories, normalizeFavorites, scopeOf, scopeLabel, inScope, tagsOf, filterExpenses, sortNewestFirst, monthlySeries, niceMax, shortMonth,
 } from './lib.js';
 
 const $ = (sel) => document.querySelector(sel);
@@ -16,6 +16,8 @@ const el = (tag, props = {}, ...children) => {
 // "all" y "recurringAll" incluyen los borrados (hacen falta para sincronizar); "expenses" y "recurring" son los vivos.
 const state = {
   all: [], expenses: [], recurringAll: [], recurring: [], budgets: {}, budgetsMeta: { updatedAt: '', dirty: false },
+  // Ajustes sincronizables que se guardan enteros: botones rápidos y categorías.
+  meta: { favorites: { value: [], updatedAt: '', dirty: false }, categories: { value: null, updatedAt: '', dirty: false } },
   month: todayISO().slice(0, 7), editingId: null,
   view: '', // '' = todo, 'personal' o 'business' (agencia)
 };
@@ -56,6 +58,11 @@ async function saveBudgets(value, updatedAt = nowISO(), dirty = true) {
   await db.setMeta('budgets', value);
   await db.setMeta('budgetsMeta', state.budgetsMeta);
 }
+async function saveMeta(key, value, updatedAt = nowISO(), dirty = true) {
+  state.meta[key] = { value, updatedAt, dirty };
+  await db.setMeta('m:' + key, state.meta[key]);
+  if (key === 'categories') setCategories(value);
+}
 const tombstone = (id) => ({ id, deleted: true, updatedAt: nowISO() });
 
 const addForm = $('#add-form');
@@ -92,6 +99,7 @@ function resetAddForm() {
   addForm.amount.value = '';
   addForm.note.value = '';
   addForm.repeat.checked = false;
+  addForm.favorite.checked = false;
   addForm.type.value = 'expense'; // lo habitual es apuntar gastos
   addForm.scope.value = state.view || 'personal'; // si estás viendo la agencia, lo normal es apuntar ahí
   addForm.date.value = todayISO();
@@ -143,6 +151,11 @@ addForm.addEventListener('submit', async (ev) => {
     await saveRecurring(rec);
   }
   await saveExpense(expense);
+  if (addForm.favorite.checked) {
+    const { amount, category, method, note, type, scope } = expense;
+    await saveMeta('favorites', normalizeFavorites([...state.meta.favorites.value, { amount, category, method, note: note.replace(/\s+$/, ''), type, scope }]));
+    renderFavorites();
+  }
   prefs.set('category.' + expense.type, expense.category);
   prefs.set('method', expense.method);
   state.month = expense.date.slice(0, 7);
@@ -154,6 +167,153 @@ addForm.addEventListener('submit', async (ev) => {
   queueSync();
   addForm.amount.focus();
 });
+
+// ---------- Botones rápidos ----------
+const favLabel = (f) => `${emojiFor(f.category)} ${f.note || f.category}`;
+
+function renderFavorites() {
+  $('#favorites').replaceChildren(...state.meta.favorites.value.map((f) => {
+    const btn = el('button', { type: 'button', className: 'fav' }, favLabel(f) + ' ', el('b', { textContent: (f.type === 'income' ? '+' : '') + formatCents(f.amount) }));
+    btn.dataset.id = f.id;
+    btn.setAttribute('aria-label', `Apuntar ${f.note || f.category}, ${formatCents(f.amount)}`);
+    return btn;
+  }));
+  const list = $('#favorites-list');
+  if (!state.meta.favorites.value.length) {
+    list.replaceChildren(el('li', { className: 'empty', textContent: 'No tienes ninguno. Marca «Guardar como botón rápido» al apuntar un movimiento.' }));
+    return;
+  }
+  list.replaceChildren(...state.meta.favorites.value.map((f) => {
+    const btn = el('button', { type: 'button', className: 'danger', textContent: 'Quitar' });
+    btn.dataset.id = f.id;
+    return el('li', {}, el('span', { textContent: `${favLabel(f)} · ${formatCents(f.amount)} · ${f.method}` }), btn);
+  }));
+}
+
+// Un toque apunta el movimiento con la fecha de hoy.
+$('#favorites').addEventListener('click', async (ev) => {
+  const btn = ev.target.closest('.fav');
+  const f = btn && state.meta.favorites.value.find((x) => x.id === btn.dataset.id);
+  if (!f) return;
+  const { amount, category, method, note, type, scope } = f;
+  const expense = normalizeExpense({ amount, category, method, note, type, scope, date: todayISO() });
+  await saveExpense(expense);
+  state.month = expense.date.slice(0, 7);
+  render();
+  const warning = expense.type === 'expense' ? budgetWarning(expense.category, state.month) : '';
+  showMsg($('#add-msg'), warning || `Guardado: ${formatCents(expense.amount)} en ${expense.category}. Toca el movimiento si quieres cambiarlo.`, warning.startsWith('🔴'));
+  queueSync();
+});
+
+$('#favorites-list').addEventListener('click', async (ev) => {
+  const id = ev.target.dataset && ev.target.dataset.id;
+  if (!id) return;
+  await saveMeta('favorites', state.meta.favorites.value.filter((f) => f.id !== id));
+  renderFavorites();
+  queueSync();
+});
+
+// ---------- Categorías editables ----------
+function renderCategories() {
+  $('#categories').replaceChildren(...getCategories().map((c, i) => {
+    const emoji = el('input', { value: c.emoji, maxLength: 8 });
+    emoji.dataset.field = 'emoji';
+    emoji.setAttribute('aria-label', `Emoji de ${c.name}`);
+    const name = el('input', { value: c.name, maxLength: 24 });
+    name.dataset.field = 'name';
+    name.setAttribute('value', c.name);
+    name.setAttribute('aria-label', `Nombre de la categoría ${c.name}`);
+    const remove = el('button', { type: 'button', className: 'danger', textContent: 'Quitar' });
+    const row = el('div', { className: 'cat-row' }, emoji, name, el('span', { className: 'kind', textContent: c.type === 'income' ? 'Ingreso' : 'Gasto' }), remove);
+    row.dataset.index = i;
+    return row;
+  }));
+}
+
+/** Guarda la lista y repinta todo lo que enseña categorías. */
+async function saveCategories(list) {
+  await saveMeta('categories', normalizeCategories(list));
+  renderCategories();
+  renderBudgets();
+  renderFavorites();
+  const typed = addForm.amount.value;
+  renderAddCategories();
+  addForm.amount.value = typed;
+  render();
+  queueSync();
+}
+
+$('#categories').addEventListener('change', async (ev) => {
+  const row = ev.target.closest('.cat-row');
+  const field = ev.target.dataset.field;
+  if (!row || !field) return;
+  const list = getCategories().map((c) => ({ ...c }));
+  const cat = list[Number(row.dataset.index)];
+  const value = ev.target.value.trim();
+  if (field === 'emoji') { cat.emoji = value; return saveCategories(list); }
+  const old = cat.name;
+  const clash = list.some((c) => c !== cat && c.type === cat.type && c.name.toLowerCase() === value.toLowerCase());
+  if (!value || clash || value === old) {
+    ev.target.value = old;
+    if (clash) showMsg($('#data-msg'), `Ya existe la categoría «${value}».`, true);
+    return;
+  }
+  cat.name = value;
+  // Renombrar: los movimientos, recurrentes, botones rápidos y el presupuesto pasan al nombre nuevo.
+  const sameType = (x) => (x.type === 'income' ? 'income' : 'expense') === cat.type;
+  const stamp = nowISO();
+  const moved = state.all.filter((e) => !e.deleted && e.category === old && sameType(e));
+  moved.forEach((e) => { e.category = value; e.updatedAt = stamp; e.dirty = true; });
+  if (moved.length) await db.putMany(moved);
+  for (const r of state.recurringAll.filter((x) => !x.deleted && x.category === old && sameType(x))) await saveRecurring({ ...r, category: value, updatedAt: stamp });
+  if (state.meta.favorites.value.some((f) => f.category === old && sameType(f))) {
+    await saveMeta('favorites', state.meta.favorites.value.map((f) => (f.category === old && sameType(f) ? { ...f, category: value } : f)));
+  }
+  if (cat.type === 'expense' && state.budgets[old]) {
+    const next = { ...state.budgets, [value]: state.budgets[old] };
+    delete next[old];
+    await saveBudgets(next);
+  }
+  for (const key of ['category.expense', 'category.income']) if (prefs.get(key, '') === old) prefs.set(key, value);
+  refresh();
+  showMsg($('#data-msg'), moved.length ? `«${old}» ahora es «${value}» (${moved.length} movimientos actualizados).` : `«${old}» ahora es «${value}».`);
+  await saveCategories(list);
+});
+
+$('#categories').addEventListener('click', async (ev) => {
+  const row = ev.target.closest('.cat-row');
+  if (!row || ev.target.tagName !== 'BUTTON') return;
+  const list = getCategories().map((c) => ({ ...c }));
+  const cat = list[Number(row.dataset.index)];
+  if (list.filter((c) => c.type === cat.type).length <= 1) return showMsg($('#data-msg'), 'Tiene que quedar al menos una categoría de cada tipo.', true);
+  if (!confirm(`¿Quitar la categoría «${cat.name}»? Los movimientos que ya la usan no se borran.`)) return;
+  list.splice(Number(row.dataset.index), 1);
+  await saveCategories(list);
+});
+
+$('#category-add').addEventListener('submit', async (ev) => {
+  ev.preventDefault();
+  const form = ev.target;
+  const name = form.name.value.trim();
+  const type = form.type.value;
+  if (!name) return;
+  if (getCategories().some((c) => c.type === type && c.name.toLowerCase() === name.toLowerCase())) {
+    return showMsg($('#data-msg'), `Ya existe la categoría «${name}».`, true);
+  }
+  await saveCategories([...getCategories(), { name, emoji: form.emoji.value, type }]);
+  form.reset();
+  showMsg($('#data-msg'), `Categoría «${name}» añadida.`);
+});
+
+// ---------- Modo privado ----------
+function setPrivate(on) {
+  document.body.classList.toggle('private', on);
+  const btn = $('#btn-private');
+  btn.setAttribute('aria-pressed', String(on));
+  btn.textContent = on ? '🙈' : '👁';
+  prefs.set('private', on ? 'on' : 'off');
+}
+$('#btn-private').addEventListener('click', () => setPrivate(!document.body.classList.contains('private')));
 
 // ---------- Recurrentes ----------
 /** Crea los movimientos recurrentes que tocan hasta hoy. Devuelve cuántos ha creado. */
@@ -196,7 +356,7 @@ $('#recurring-list').addEventListener('click', async (ev) => {
 
 // ---------- Presupuestos ----------
 function renderBudgets() {
-  $('#budgets').replaceChildren(...CATEGORIES.map((c) => {
+  $('#budgets').replaceChildren(...categoriesFor('expense').map((c) => {
     const input = el('input', { inputMode: 'decimal', placeholder: 'Sin límite', value: state.budgets[c.name] ? centsToInput(state.budgets[c.name]) : '' });
     input.dataset.category = c.name;
     input.setAttribute('aria-label', `Presupuesto de ${c.name} en euros`);
@@ -333,10 +493,10 @@ function barPath(x, y, w, base) {
 function renderChart() {
   const select = $('#chart-category');
   const category = select.value;
-  const wanted = ['', ...CATEGORIES.map((c) => c.name)];
-  if (select.options.length !== wanted.length) {
+  const wanted = ['', ...categoriesFor('expense').map((c) => c.name)];
+  if ([...select.options].map((o) => o.value).join('|') !== wanted.join('|')) {
     select.replaceChildren(...wanted.map((v) => el('option', { value: v, textContent: v || 'Todo' })));
-    select.value = category;
+    select.value = wanted.includes(category) ? category : '';
   }
   const endYm = todayISO().slice(0, 7) > state.month ? todayISO().slice(0, 7) : state.month;
   const series = monthlySeries(visible(), endYm, 6, category);
@@ -499,6 +659,8 @@ function download(filename, text, type) {
 $('#btn-data').addEventListener('click', () => {
   renderBudgets();
   renderRecurring();
+  renderFavorites();
+  renderCategories();
   const cfg = sync.getConfig();
   $('#sync-url').value = cfg.url;
   $('#sync-key').value = cfg.key;
@@ -507,7 +669,7 @@ $('#btn-data').addEventListener('click', () => {
   dataDialog.showModal();
 });
 $('#data-close').addEventListener('click', () => dataDialog.close());
-$('#export-json').addEventListener('click', () => download(`gastos-${todayISO()}.json`, toJSON(state.expenses, state.budgets, state.recurring), 'application/json'));
+$('#export-json').addEventListener('click', () => download(`gastos-${todayISO()}.json`, toJSON(state.expenses, state.budgets, state.recurring, { favorites: state.meta.favorites.value, categories: state.meta.categories.value }), 'application/json'));
 $('#export-csv').addEventListener('click', () => download(`gastos-${state.view === 'business' ? 'agencia-' : state.view === 'personal' ? 'personal-' : ''}${todayISO()}.csv`, toCSV(visible()), 'text/csv;charset=utf-8'));
 $('#import-btn').addEventListener('click', () => $('#import-file').click());
 
@@ -518,8 +680,8 @@ $('#import-file').addEventListener('change', async (ev) => {
   const msg = $('#data-msg');
   const text = await file.text();
   const isJSON = file.name.toLowerCase().endsWith('.json') || /^\s*[\[{]/.test(text);
-  const { expenses, errors, budgets = {}, recurring = [] } = isJSON ? fromJSON(text) : fromCSV(text);
-  if (!expenses.length && !recurring.length && !Object.keys(budgets).length) {
+  const { expenses, errors, budgets = {}, recurring = [], favorites = [], categories = null } = isJSON ? fromJSON(text) : fromCSV(text);
+  if (!expenses.length && !recurring.length && !Object.keys(budgets).length && !favorites.length && !categories) {
     return showMsg(msg, errors[0] || 'No se ha encontrado ningún movimiento en el archivo.', true);
   }
   // Fusión por id: lo importado sustituye a lo que tenga el mismo id; el resto se añade.
@@ -539,6 +701,14 @@ $('#import-file').addEventListener('change', async (ev) => {
     await saveRecurring({ ...r, lastGenerated, updatedAt: stamp });
   }
   if (recurring.length) await generateDue();
+  if (categories) await saveMeta('categories', categories);
+  if (favorites.length) {
+    const mine = new Set(state.meta.favorites.value.map((f) => f.id));
+    await saveMeta('favorites', [...state.meta.favorites.value, ...favorites.filter((f) => !mine.has(f.id))]);
+  }
+  renderFavorites();
+  renderCategories();
+  { const typed = addForm.amount.value; renderAddCategories(); addForm.amount.value = typed; }
   queueSync();
   renderBudgets();
   renderRecurring();
@@ -553,11 +723,13 @@ const store = {
     const rows = state.all.map((record) => ({ id: record.id, record }));
     for (const r of state.recurringAll) rows.push({ id: 'rec:' + r.id, record: r });
     if (state.budgetsMeta.updatedAt) rows.push({ id: 'meta:budgets', record: { value: state.budgets, ...state.budgetsMeta } });
+    for (const key of Object.keys(state.meta)) if (state.meta[key].updatedAt) rows.push({ id: 'meta:' + key, record: state.meta[key] });
     return rows;
   },
   async apply(kind, record) {
     if (kind === 'expense') return saveExpense(record, false);
     if (kind === 'budgets') return saveBudgets(record.value, record.updatedAt, false);
+    if (kind === 'meta') return saveMeta(record.key, record.value, record.updatedAt, false);
     const mine = state.recurringAll.find((r) => r.id === record.id);
     if (!record.deleted && mine && !mine.deleted && mine.lastGenerated > record.lastGenerated) record.lastGenerated = mine.lastGenerated;
     return saveRecurring(record, false);
@@ -566,6 +738,9 @@ const store = {
   async markClean(id, updatedAt) {
     if (id === 'meta:budgets') {
       if (state.budgetsMeta.updatedAt === updatedAt) await saveBudgets(state.budgets, updatedAt, false);
+    } else if (id.startsWith('meta:')) {
+      const m = state.meta[id.slice(5)];
+      if (m && m.updatedAt === updatedAt) await saveMeta(id.slice(5), m.value, updatedAt, false);
     } else if (id.startsWith('rec:')) {
       const r = state.recurringAll.find((x) => x.id === id.slice(4));
       if (r && r.updatedAt === updatedAt) await saveRecurring({ ...r }, false);
@@ -595,8 +770,12 @@ async function runSync() {
     const result = await sync.syncNow(store);
     if (result && result.pulled) {
       const created = await generateDue();
+      const typed = addForm.amount.value; // no pisar lo que se esté escribiendo
+      renderAddCategories();
+      addForm.amount.value = typed;
+      renderFavorites();
       render();
-      if (dataDialog.open) { renderBudgets(); renderRecurring(); }
+      if (dataDialog.open) { renderBudgets(); renderRecurring(); renderCategories(); }
       if (created) queueSync();
     }
     const time = new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
@@ -626,6 +805,7 @@ $('#sync-save').addEventListener('click', async () => {
     await db.putMany(state.all);
     await db.setMeta('recurring', state.recurringAll);
     if (state.budgetsMeta.updatedAt) await saveBudgets(state.budgets, state.budgetsMeta.updatedAt, true);
+    for (const key of Object.keys(state.meta)) if (state.meta[key].updatedAt) await saveMeta(key, state.meta[key].value, state.meta[key].updatedAt, true);
   }
   await runSync();
 });
@@ -638,7 +818,15 @@ async function start() {
   const savedView = prefs.get('view', 'all');
   state.view = savedView === 'personal' || savedView === 'business' ? savedView : '';
   document.querySelector(`#view input[value="${state.view}"]`).checked = true;
+  setPrivate(prefs.get('private', 'off') === 'on');
+  try {
+    // Las categorías van primero: el formulario de alta las necesita.
+    const [favorites, categories] = await Promise.all([db.getMeta('m:favorites', null), db.getMeta('m:categories', null)]);
+    if (favorites) state.meta.favorites = favorites;
+    if (categories) { state.meta.categories = categories; setCategories(categories.value); }
+  } catch { /* el aviso de almacenamiento sale más abajo */ }
   setupForms();
+  renderFavorites();
   let created = 0;
   try {
     const [all, budgets, budgetsMeta, recurringAll] = await Promise.all([

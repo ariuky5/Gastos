@@ -235,3 +235,32 @@ test('un recurrente de la agencia genera movimientos de la agencia', () => {
   assert.equal(dueRecurring([rec], '2026-11-11').expenses[0].scope, 'business');
   assert.equal(normalizeRecurring({ amount: 1, day: 1, lastGenerated: '2026-10' }).scope, 'personal');
 });
+
+// ---------- Botones rápidos y categorías editables ----------
+import { normalizeCategories, normalizeFavorites, setCategories, categoriesFor, emojiFor } from '../lib.js';
+
+test('categorías: limpia, quita duplicados y garantiza una de cada tipo', () => {
+  const list = normalizeCategories([{ name: ' Mascota ', emoji: '🐶' }, { name: 'mascota' }, { name: '' }, { name: 'Sin emoji' }]);
+  assert.deepEqual(list.filter((c) => c.type === 'expense'), [{ name: 'Mascota', emoji: '🐶', type: 'expense' }, { name: 'Sin emoji', emoji: '📦', type: 'expense' }]);
+  assert.ok(list.some((c) => c.type === 'income')); // se añaden las de ingreso de fábrica
+  setCategories(list);
+  assert.equal(emojiFor('Mascota'), '🐶');
+  assert.equal(emojiFor('Comida'), '📦'); // ya no está en la lista
+  assert.deepEqual(categoriesFor('expense').map((c) => c.name), ['Mascota', 'Sin emoji']);
+  setCategories(null);
+  assert.equal(emojiFor('Comida'), '🍽️');
+});
+
+test('botones rápidos: valida y viajan por sincronización y copia JSON', () => {
+  const favs = normalizeFavorites([{ amount: 150, category: 'Comida', note: 'café' }, { amount: 0 }, { amount: '5' }, null]);
+  assert.equal(favs.length, 1);
+  assert.equal(favs[0].scope, 'personal');
+  const meta = { value: favs, updatedAt: '2026-11-12T10:00:00.000Z', dirty: true };
+  assert.deepEqual(fromRow(toRow('meta:favorites', meta)), { kind: 'meta', record: { key: 'favorites', value: favs, updatedAt: meta.updatedAt, dirty: false } });
+  const cats = normalizeCategories([{ name: 'Mascota', emoji: '🐶' }]);
+  assert.deepEqual(fromRow(toRow('meta:categories', { value: cats, updatedAt: 'x' })).record.value, cats);
+  const back = fromJSON(toJSON([], {}, [], { favorites: favs, categories: cats }));
+  assert.deepEqual(back.favorites, favs);
+  assert.deepEqual(back.categories, cats);
+  assert.equal(fromJSON(toJSON([])).categories, null);
+});

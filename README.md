@@ -17,7 +17,7 @@ Abre la dirección que te indique. Para instalarla en el móvil hay que publicar
 - `db.js`: guardado en IndexedDB.
 - `sync.js`: sincronización opcional con un webhook de n8n (pull y push, gana el cambio más reciente).
 - `sw.js`: funcionamiento sin conexión. Sube `CACHE` de versión si cambias la lista de archivos.
-- `tests/`: pruebas (`node --test tests/lib.test.mjs`, `node tests/e2e.cjs`, `node tests/hito3.e2e.cjs`, `node tests/hito4.e2e.cjs` y `node tests/sync.e2e.cjs`; las cuatro últimas necesitan Playwright).
+- `tests/`: pruebas (`node --test tests/lib.test.mjs`, `node tests/e2e.cjs`, `node tests/hito3.e2e.cjs`, `node tests/hito4.e2e.cjs`, `node tests/hito5.e2e.cjs` y `node tests/sync.e2e.cjs`; las cinco últimas necesitan Playwright).
 
 ## Sincronización entre dispositivos (opcional)
 

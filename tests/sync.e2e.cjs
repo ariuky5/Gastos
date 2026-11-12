@@ -195,8 +195,32 @@ const api = http.createServer((req, res) => {
   await A.page.click('#data-close');
   step('quitar un recurrente se propaga');
 
+  // Botones rápidos y categorías propias también viajan
+  await A.page.click('#btn-data');
+  await A.page.fill('#category-add [name=emoji]', '🐶');
+  await A.page.fill('#category-add [name=name]', 'Mascota');
+  await A.page.click('#category-add button');
+  await A.page.waitForSelector('#categories input[value="Mascota"]');
+  await A.page.click('#data-close');
+  await A.page.fill('#add-amount', '1,50');
+  await A.page.click('.chip:has-text("Mascota")');
+  await A.page.fill('#add-form [name=note]', 'chuches');
+  await A.page.check('#add-form [name=favorite]');
+  await A.page.click('#add-submit');
+  await A.page.waitForSelector('.fav:has-text("chuches")');
+  await A.page.waitForTimeout(2500);
+  await B.reload();
+  assert.equal(await B.page.locator('.chip:has-text("Mascota")').count(), 1);
+  assert.match(await B.page.textContent('.fav'), /🐶 chuches/);
+  await B.page.click('.fav:has-text("chuches")'); // un toque en B apunta otro
+  await B.page.waitForFunction(() => document.querySelectorAll('.item').length === 5);
+  await B.page.waitForTimeout(2500);
+  await A.reload();
+  assert.equal(await A.page.locator('.item:has-text("chuches")').count(), 2);
+  step('botones rápidos y categorías propias se sincronizan');
+
   // Sin duplicados en ningún lado
-  for (const d of [A, B]) assert.equal(await d.page.locator('.item').count(), 3);
+  for (const d of [A, B]) assert.equal(await d.page.locator('.item').count(), 5);
   assert.equal(new Set([...table.keys()]).size, table.size);
   step('sin duplicados');
 

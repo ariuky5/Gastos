@@ -14,13 +14,17 @@
 </head>
 <body>
   <header class="top">
-    <h1>Gastos</h1>
-    <button id="btn-data" class="ghost">Ajustes</button>
+    <h1><img src="icons/icon.svg" class="logo" alt="" width="36" height="36">Gastos</h1>
+    <div class="top-actions">
+      <button id="btn-private" class="ghost" aria-pressed="false" aria-label="Modo privado: ocultar importes" title="Ocultar importes">👁</button>
+      <button id="btn-data" class="ghost">Ajustes</button>
+    </div>
   </header>
 
   <main>
     <!-- Alta rápida -->
     <form id="add-form" class="card" autocomplete="off" novalidate>
+      <div id="favorites" class="favs" aria-label="Botones rápidos"></div>
       <div class="seg" role="radiogroup" aria-label="Tipo de movimiento">
         <label><input type="radio" name="type" value="expense" checked>Gasto</label>
         <label><input type="radio" name="type" value="income">Ingreso</label>
@@ -39,7 +43,10 @@
         <select name="method" aria-label="Método de pago"></select>
       </div>
       <input name="note" type="text" placeholder="Nota (opcional). Usa #etiquetas" maxlength="120" aria-label="Nota">
-      <label class="check"><input type="checkbox" name="repeat">Repetir cada mes</label>
+      <div class="checks">
+        <label class="check"><input type="checkbox" name="repeat">Repetir cada mes</label>
+        <label class="check"><input type="checkbox" name="favorite">Guardar como botón rápido</label>
+      </div>
       <button type="submit" class="primary" id="add-submit">Guardar gasto</button>
       <p id="add-msg" class="msg" role="status" aria-live="polite"></p>
     </form>
@@ -130,6 +137,19 @@
 
     <h3>Recurrentes</h3>
     <ul id="recurring-list" class="recurring"></ul>
+
+    <h3>Botones rápidos</h3>
+    <ul id="favorites-list" class="recurring"></ul>
+
+    <h3>Categorías</h3>
+    <p class="hint">Cambia el emoji o el nombre y se guarda solo. Al renombrar, los movimientos que ya tenías pasan al nombre nuevo.</p>
+    <div id="categories" class="cats"></div>
+    <form id="category-add" class="cat-row" autocomplete="off">
+      <input name="emoji" aria-label="Emoji de la categoría nueva" placeholder="🙂" maxlength="8">
+      <input name="name" aria-label="Nombre de la categoría nueva" placeholder="Nueva categoría" maxlength="24" required>
+      <select name="type" aria-label="Tipo"><option value="expense">Gasto</option><option value="income">Ingreso</option></select>
+      <button type="submit">Añadir</button>
+    </form>
 
     <h3>Sincronización entre dispositivos</h3>
     <p class="hint">Opcional. Pon la URL del webhook de n8n y la misma clave en todos tus dispositivos. Déjalo vacío para no sincronizar.</p>

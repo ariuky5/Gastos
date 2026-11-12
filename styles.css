@@ -221,3 +221,34 @@ dialog h3 { font-size: 15px; margin: 20px 0 6px; }
   dialog { width: min(92vw, 560px); padding: 24px; }
   .watermark { position: fixed; right: 20px; bottom: 14px; padding: 0; z-index: 1; }
 }
+
+/* ---- Logo, botones rápidos, categorías editables y modo privado ---- */
+h1 { display: flex; align-items: center; gap: 10px; }
+.logo { border-radius: 9px; display: block; }
+.top-actions { display: flex; gap: 8px; }
+#btn-private { min-width: 44px; padding: 0 10px; font-size: 18px; }
+#btn-private[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); }
+
+.favs { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 2px; scrollbar-width: thin; }
+.favs:empty { display: none; }
+.fav {
+  flex: 0 0 auto; display: inline-flex; align-items: center; gap: 6px; min-height: 40px; padding: 6px 12px;
+  border-radius: 12px; border: 1px dashed var(--accent); background: transparent; font-size: 14px; white-space: nowrap;
+}
+.fav b { font-variant-numeric: tabular-nums; }
+.checks { display: flex; flex-wrap: wrap; gap: 4px 16px; }
+
+.cats { display: grid; gap: 6px; }
+.cat-row { display: grid; grid-template-columns: 52px minmax(0, 1fr) auto auto; gap: 6px; align-items: center; margin-top: 6px; }
+.cat-row input, .cat-row select { min-height: 40px; padding: 6px 8px; }
+.cat-row input:first-child { text-align: center; }
+.cat-row .kind { font-size: 12px; color: var(--muted); white-space: nowrap; }
+.cat-row button { min-height: 40px; padding: 6px 10px; font-size: 13px; }
+
+/* Modo privado: los importes se difuminan, el resto se ve igual. */
+body.private :is(#month-total, #month-income, #month-balance, .amt, .day span:last-child, .by-cat .line span:last-child,
+  #alerts, #chart-detail, .chart svg text:not(.current), #chart-rows td:not(:first-child), #filter-summary span,
+  .fav b, #add-msg, #recurring-list span, #favorites-list span, #budgets input) {
+  filter: blur(7px); user-select: none;
+}
+body.private .chart svg text[text-anchor="middle"] { filter: none; }

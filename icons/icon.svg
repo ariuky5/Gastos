@@ -1,4 +1,26 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <rect width="512" height="512" fill="#0f766e"/>
-  <text x="256" y="345" font-family="Arial, Helvetica, sans-serif" font-size="280" font-weight="700" fill="#ffffff" text-anchor="middle">€</text>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#17b3a3"/>
+      <stop offset="0.55" stop-color="#0f766e"/>
+      <stop offset="1" stop-color="#0a3d3a"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.25" cy="0.2" r="0.8">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.22"/>
+      <stop offset="0.6" stop-color="#ffffff" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="coin" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ffe08a"/>
+      <stop offset="1" stop-color="#f0a92b"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" fill="url(#bg)"/>
+  <rect width="512" height="512" fill="url(#glow)"/>
+  <!-- U de uky: un recipiente que se llena y una flecha que sube -->
+  <g fill="none" stroke="#ffffff" stroke-width="50" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M172 214 V284 a84 84 0 0 0 168 0 V168"/>
+    <path d="M292 208 L340 160 L388 208"/>
+  </g>
+  <circle cx="172" cy="140" r="33" fill="url(#coin)"/>
+  <circle cx="172" cy="140" r="33" fill="none" stroke="#ffffff" stroke-opacity="0.35" stroke-width="4"/>
 </svg>

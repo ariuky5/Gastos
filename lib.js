@@ -24,10 +24,53 @@ export const scopeLabel = (scope) => (scope === 'business' ? 'Agencia' : scope =
 /** Movimientos de un ámbito; con '' devuelve todos. */
 export const inScope = (expenses, scope) => (scope ? expenses.filter((e) => scopeOf(e) === scope) : expenses);
 
-export const categoriesFor = (type) => (type === 'income' ? INCOME_CATEGORIES : CATEGORIES);
+// ---------- Categorías (editables) ----------
+const DEFAULT_CATEGORIES = [
+  ...CATEGORIES.map((c) => ({ ...c, type: 'expense' })),
+  ...INCOME_CATEGORIES.map((c) => ({ ...c, type: 'income' })),
+];
 
-export const emojiFor = (category) =>
-  ([...CATEGORIES, ...INCOME_CATEGORIES].find((c) => c.name === category) || { emoji: '📦' }).emoji;
+/** Limpia una lista de categorías { name, emoji, type }. Garantiza al menos una de gasto y una de ingreso. */
+export function normalizeCategories(raw) {
+  const out = [];
+  const seen = new Set();
+  for (const c of Array.isArray(raw) ? raw : []) {
+    const name = String((c && c.name) || '').trim().slice(0, 24);
+    const type = c && c.type === 'income' ? 'income' : 'expense';
+    if (!name || seen.has(type + '|' + name.toLowerCase())) continue;
+    seen.add(type + '|' + name.toLowerCase());
+    out.push({ name, emoji: [...String((c && c.emoji) || '').trim()].slice(0, 4).join('') || '📦', type });
+  }
+  for (const type of ['expense', 'income']) {
+    if (!out.some((c) => c.type === type)) out.push(...DEFAULT_CATEGORIES.filter((c) => c.type === type));
+  }
+  return out;
+}
+
+let categories = DEFAULT_CATEGORIES;
+/** Cambia la lista de categorías en uso (null o vacío vuelve a las de fábrica). */
+export function setCategories(list) {
+  categories = list && list.length ? normalizeCategories(list) : DEFAULT_CATEGORIES;
+}
+export const getCategories = () => categories;
+export const categoriesFor = (type) => categories.filter((c) => c.type === (type === 'income' ? 'income' : 'expense'));
+export const emojiFor = (category) => (categories.find((c) => c.name === category) || { emoji: '📦' }).emoji;
+
+/** Limpia la lista de botones rápidos: { id, amount, category, method, note, type, scope }. */
+export function normalizeFavorites(raw) {
+  const out = [];
+  for (const f of Array.isArray(raw) ? raw : []) {
+    if (!f || !Number.isInteger(f.amount) || f.amount <= 0) continue;
+    const type = f.type === 'income' ? 'income' : 'expense';
+    out.push({
+      id: String(f.id || crypto.randomUUID()), amount: f.amount, type, scope: scopeOf(f),
+      category: String(f.category || (type === 'income' ? 'Otros ingresos' : 'Otros')).trim(),
+      method: String(f.method || METHODS[0]).trim() || METHODS[0],
+      note: String(f.note || '').trim().slice(0, 120),
+    });
+  }
+  return out;
+}
 
 const eur = new Intl.NumberFormat('es-ES', { style: 'currency', currency: 'EUR', useGrouping: 'always' });
 export const formatCents = (cents) => eur.format(cents / 100);
@@ -308,8 +351,12 @@ export function fromCSV(text) {
 }
 
 // ---------- JSON (copia completa: movimientos, presupuestos y recurrentes) ----------
-export const toJSON = (expenses, budgets = {}, recurring = []) =>
-  JSON.stringify({ app: 'gastos', version: 2, exportedAt: new Date().toISOString(), expenses: expenses.map(clean), budgets, recurring: recurring.map(clean) }, null, 2);
+export const toJSON = (expenses, budgets = {}, recurring = [], extra = {}) =>
+  JSON.stringify({
+    app: 'gastos', version: 3, exportedAt: new Date().toISOString(),
+    expenses: expenses.map(clean), budgets, recurring: recurring.map(clean),
+    favorites: extra.favorites || [], categories: extra.categories || null,
+  }, null, 2);
 
 export function fromJSON(text) {
   const empty = { expenses: [], budgets: {}, recurring: [] };
@@ -324,12 +371,17 @@ export function fromJSON(text) {
   (Array.isArray(data.recurring) ? data.recurring : []).forEach((raw, i) => {
     try { recurring.push(normalizeRecurring(raw || {})); } catch (err) { errors.push(`Recurrente ${i + 1}: ${err.message}`); }
   });
-  return { expenses, budgets: normalizeBudgets(data.budgets), recurring, errors };
+  return {
+    expenses, budgets: normalizeBudgets(data.budgets), recurring, errors,
+    favorites: normalizeFavorites(data.favorites),
+    categories: Array.isArray(data.categories) && data.categories.length ? normalizeCategories(data.categories) : null,
+  };
 }
 
 // ---------- Sincronización ----------
 // Cada cosa sincronizable viaja como una fila { id, data, updatedAt, deleted }.
-// Ids: el del movimiento tal cual, "rec:<id>" para recurrentes y "meta:budgets" para los presupuestos.
+// Ids: el del movimiento tal cual, "rec:<id>" para recurrentes y "meta:<clave>" para presupuestos,
+// botones rápidos (favorites) y categorías.
 // Regla de conflicto: gana la versión con "updatedAt" más reciente.
 
 /** Quita los campos internos que no deben salir del dispositivo. */
@@ -355,8 +407,18 @@ export const remoteWins = (row, local) => !local || String(row.updatedAt) > Stri
  */
 export function fromRow(row) {
   if (!row || typeof row.id !== 'string' || typeof row.updatedAt !== 'string') return null;
-  const kind = row.id === 'meta:budgets' ? 'budgets' : row.id.startsWith('rec:') ? 'recurring' : row.id.startsWith('meta:') ? null : 'expense';
+  const metaKey = row.id.startsWith('meta:') ? row.id.slice(5) : '';
+  const kind = metaKey === 'budgets' ? 'budgets' : metaKey === 'favorites' || metaKey === 'categories' ? 'meta'
+    : metaKey ? null : row.id.startsWith('rec:') ? 'recurring' : 'expense';
   if (!kind) return null;
+  if (kind === 'meta') {
+    if (row.deleted) return null;
+    try {
+      const data = JSON.parse(row.data);
+      const value = metaKey === 'favorites' ? normalizeFavorites(data.value) : normalizeCategories(data.value);
+      return { kind, record: { key: metaKey, value, updatedAt: row.updatedAt, dirty: false } };
+    } catch { return null; }
+  }
   const localId = kind === 'recurring' ? row.id.slice(4) : row.id;
   if (row.deleted) return { kind, record: { id: localId, deleted: true, updatedAt: row.updatedAt, dirty: false } };
   let data;
