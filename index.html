@@ -51,7 +51,7 @@
       <label><input type="radio" name="view" value="business">Agencia</label>
     </div>
 
-    <section class="card">
+    <section class="card card-summary">
       <div class="month-nav">
         <button id="prev-month" class="ghost" aria-label="Mes anterior">‹</button>
         <h2 id="month-label"></h2>
@@ -66,7 +66,7 @@
       <ul id="by-cat" class="by-cat"></ul>
     </section>
 
-    <section class="card">
+    <section class="card card-chart">
       <div class="chart-head">
         <h2>Evolución</h2>
         <select id="chart-category" aria-label="Categoría del gráfico"></select>
@@ -80,7 +80,7 @@
       </details>
     </section>
 
-    <section class="card">
+    <section class="card card-list">
       <h2 class="section-title">Movimientos</h2>
       <input id="search" type="search" placeholder="Buscar: nota, categoría, #etiqueta…" aria-label="Buscar movimientos" autocomplete="off">
       <details id="filters" class="filters">
@@ -97,6 +97,7 @@
     </section>
     <p id="sync-status" class="msg sync-status" role="status" aria-live="polite"></p>
   </main>
+  <p class="watermark" aria-hidden="true">uky_system</p>
 
   <!-- Editar -->
   <dialog id="edit-dialog">

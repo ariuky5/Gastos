@@ -164,7 +164,7 @@ export function monthlySeries(expenses, endYm, n = 6, category = '') {
 
 /** Tope "redondo" para el eje: 1, 2 o 5 por una potencia de 10 (en céntimos). */
 export function niceMax(cents) {
-  if (cents <= 0) return 1000;
+  if (cents <= 1000) return 1000; // como mínimo, un eje de 10 €
   const pow = 10 ** Math.floor(Math.log10(cents));
   const lead = cents / pow;
   return (lead <= 1 ? 1 : lead <= 2 ? 2 : lead <= 5 ? 5 : 10) * pow;

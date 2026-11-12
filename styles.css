@@ -184,3 +184,40 @@ dialog h3 { font-size: 15px; margin: 20px 0 6px; }
 /* ---- Hito 4: personal / agencia ---- */
 .seg.three { grid-template-columns: repeat(3, 1fr); }
 .seg.small label { min-height: 32px; padding: 5px 8px; font-size: 13px; }
+
+/* ---- Marca de agua ---- */
+/* En móvil va al final de la página para no tapar nada; en ordenador queda fija en la esquina. */
+.watermark {
+  margin: 0; padding: 4px 16px 24px; text-align: center; font-size: 13px; font-weight: 600;
+  letter-spacing: .08em; color: var(--muted); opacity: .55; user-select: none; pointer-events: none;
+}
+
+/* ---- Ordenador (pantallas anchas). El móvil no cambia. ---- */
+@media (min-width: 900px) {
+  .top, main { max-width: 1240px; padding-left: 24px; padding-right: 24px; }
+  main { padding-bottom: 56px; }
+  .top { padding-top: 20px; padding-bottom: 12px; }
+  h1 { font-size: 26px; }
+  main {
+    grid-template-columns: 380px minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-areas:
+      "add view    view"
+      "add summary chart"
+      "add list    list"
+      "add status  status";
+    align-items: start; gap: 16px;
+  }
+  #add-form { grid-area: add; position: sticky; top: 16px; }
+  #view { grid-area: view; max-width: 420px; }
+  .card-summary { grid-area: summary; }
+  .card-chart { grid-area: chart; }
+  .card-list { grid-area: list; }
+  #sync-status { grid-area: status; text-align: left; }
+  .card { padding: 20px; }
+  .card-list .filter-grid { grid-template-columns: repeat(3, 1fr); }
+  .item { padding: 10px 8px; border-radius: 8px; }
+  .item:hover { background: var(--bg); }
+  button:hover:not(.primary):not(.item) { border-color: var(--muted); }
+  dialog { width: min(92vw, 560px); padding: 24px; }
+  .watermark { position: fixed; right: 20px; bottom: 14px; padding: 0; z-index: 1; }
+}
