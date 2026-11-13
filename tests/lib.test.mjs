@@ -285,3 +285,83 @@ test('grupos: cuentan en su ámbito y viajan por sincronización y copia JSON', 
   assert.deepEqual(fromRow(toRow('meta:groups', { value: groups, updatedAt: 'x' })).record.value, groups);
   assert.deepEqual(fromJSON(toJSON([], {}, [], { groups })).groups, groups);
 });
+
+// ---------- Recurrentes con periodicidad, objetivos y comparativa ----------
+import { nextRecurringDate, recurringFromNextDate, normalizeGoals, goalProgress, compareMonths } from '../lib.js';
+
+test('recurrente anual y trimestral: solo genera los meses que tocan', () => {
+  const anual = normalizeRecurring({ id: 'a', amount: '120', day: 15, every: 12, lastGenerated: '2025-03' });
+  const tri = normalizeRecurring({ id: 't', amount: '30', day: 31, every: 3, lastGenerated: '2026-01' });
+  const { expenses, recurring } = dueRecurring([anual, tri], '2026-11-13');
+  assert.deepEqual(expenses.map((e) => e.id), ['a-2026-03', 't-2026-04', 't-2026-07', 't-2026-10']);
+  assert.equal(expenses[1].date, '2026-04-30');
+  assert.equal(recurring[0].lastGenerated, '2026-03');
+  assert.equal(nextRecurringDate(recurring[0]), '2027-03-15');
+  assert.equal(nextRecurringDate(recurring[1]), '2027-01-31');
+  // Sin "every" (datos antiguos) sigue siendo mensual
+  assert.equal(normalizeRecurring({ amount: 100, day: 1, lastGenerated: '2026-01' }).every, 1);
+  assert.equal(normalizeRecurring({ amount: 100, day: 1, every: 7, lastGenerated: '2026-01' }).every, 1);
+});
+
+test('recurringFromNextDate y grupo en los movimientos generados', () => {
+  assert.deepEqual(recurringFromNextDate('2026-12-05', 1), { day: 5, lastGenerated: '2026-11' });
+  assert.deepEqual(recurringFromNextDate('2027-01-20', 12), { day: 20, lastGenerated: '2026-01' });
+  assert.throws(() => recurringFromNextDate('mañana'), /Fecha/);
+  const rec = normalizeRecurring({ id: 'g', amount: 500, day: 1, group: 'viaje', lastGenerated: '2026-10' });
+  assert.equal(dueRecurring([rec], '2026-11-02').expenses[0].group, 'viaje');
+});
+
+test('dos dispositivos generan el mismo recurrente con el mismo id y fecha de cambio (no se duplica al sincronizar)', () => {
+  const rec = normalizeRecurring({ id: 'r', amount: 999, day: 1, every: 1, lastGenerated: '2026-09', updatedAt: '2026-09-01T10:00:00.000Z' });
+  const a = dueRecurring([rec], '2026-11-13').expenses;
+  const b = dueRecurring([fromRow(toRow('rec:r', rec)).record], '2026-11-13').expenses;
+  assert.deepEqual(a.map((e) => [e.id, e.updatedAt]), b.map((e) => [e.id, e.updatedAt]));
+  assert.equal(a.length, 2);
+});
+
+test('normalizeGoals y goalProgress', () => {
+  const goals = normalizeGoals([
+    { id: 'g1', name: ' Colchón ', target: 300000, saved: 75000, deadline: '2027-04-30' },
+    { name: 'Sin meta', target: 0 }, { name: '', target: 100 }, { name: 'Coche', target: 100, saved: -5, deadline: 'luego' },
+  ]);
+  assert.equal(goals.length, 2);
+  assert.deepEqual(goals[0], { id: 'g1', name: 'Colchón', target: 300000, saved: 75000, emoji: '🎯', deadline: '2027-04-30' });
+  assert.equal(goals[1].saved, 0);
+  assert.equal(goals[1].deadline, undefined);
+  // 2.250 € que faltan en 6 meses (nov a abr, contando noviembre)
+  assert.deepEqual(goalProgress(goals[0], '2026-11-13'), { pct: 25, left: 225000, done: false, months: 6, perMonth: 37500, late: false });
+  assert.equal(goalProgress({ ...goals[0], saved: 299999 }, '2026-11-13').pct, 99);
+  assert.equal(goalProgress({ ...goals[0], saved: 400000 }).done, true);
+  assert.equal(goalProgress(goals[0], '2027-05-01').late, true);
+  // Viaja por la sincronización como meta:goals
+  const row = toRow('meta:goals', { value: goals, updatedAt: '2026-11-13T10:00:00.000Z' });
+  assert.deepEqual(fromRow(row).record.value, goals);
+});
+
+test('compareMonths: por categoría, mes completo o hasta el mismo día', () => {
+  const mk = (amount, category, date, type) => normalizeExpense({ amount, category, date, type });
+  const list = [
+    mk(1000, 'Comida', '2026-10-02'), mk(4000, 'Comida', '2026-10-25'), mk(2000, 'Ocio', '2026-10-05'),
+    mk(3000, 'Comida', '2026-11-03'), mk(1500, 'Casa', '2026-11-10'), mk(200000, 'Sueldo', '2026-11-01', 'income'),
+    mk(9999, 'Comida', '2026-09-10'),
+  ];
+  const full = compareMonths(list, '2026-11');
+  assert.equal(full.prevYm, '2026-10');
+  assert.deepEqual(full.total, { current: 4500, previous: 7000, diff: -2500, pct: -36 });
+  assert.deepEqual(full.income, { current: 200000, previous: 0, diff: 200000, pct: null });
+  assert.deepEqual(full.rows.map((r) => [r.category, r.current, r.previous, r.diff, r.pct]), [
+    ['Comida', 3000, 5000, -2000, -40], ['Ocio', 0, 2000, -2000, -100], ['Casa', 1500, 0, 1500, null],
+  ]);
+  const sameDays = compareMonths(list, '2026-11', 13);
+  assert.deepEqual(sameDays.total, { current: 4500, previous: 3000, diff: 1500, pct: 50 });
+  assert.deepEqual(sameDays.rows.find((r) => r.category === 'Comida'), { category: 'Comida', current: 3000, previous: 1000, diff: 2000, pct: 200 });
+});
+
+test('la copia JSON incluye objetivos y la periodicidad de los recurrentes', () => {
+  const rec = normalizeRecurring({ id: 'r', amount: 100, day: 1, every: 12, lastGenerated: '2026-01' });
+  const goals = normalizeGoals([{ id: 'g', name: 'Viaje', target: 50000, saved: 1000 }]);
+  const back = fromJSON(toJSON([], {}, [rec], { goals }));
+  assert.deepEqual(back.goals, goals);
+  assert.equal(back.recurring[0].every, 12);
+  assert.deepEqual(fromJSON(JSON.stringify({ expenses: [] })).goals, []);
+});

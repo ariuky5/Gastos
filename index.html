@@ -78,6 +78,18 @@
       <ul id="by-cat" class="by-cat"></ul>
     </section>
 
+    <section class="card card-compare" aria-labelledby="cmp-title">
+      <div class="chart-head">
+        <h2 id="cmp-title">Comparativa</h2>
+        <div id="cmp-mode" class="seg small" role="radiogroup" aria-label="Qué días comparar">
+          <label><input type="radio" name="cmp" value="days" checked>Mismos días</label>
+          <label><input type="radio" name="cmp" value="full">Mes completo</label>
+        </div>
+      </div>
+      <p id="cmp-sub" class="hint cmp-sub"></p>
+      <ul id="cmp-rows" class="cmp"></ul>
+    </section>
+
     <section class="card card-chart">
       <div class="chart-head">
         <h2>Evolución</h2>
@@ -90,6 +102,14 @@
         <summary>Ver los datos en tabla</summary>
         <table><thead><tr><th>Mes</th><th>Gastos</th><th>Ingresos</th></tr></thead><tbody id="chart-rows"></tbody></table>
       </details>
+    </section>
+
+    <section class="card card-goals" aria-labelledby="goals-title">
+      <div class="chart-head">
+        <h2 id="goals-title">Objetivos de ahorro</h2>
+        <button type="button" id="goal-new" class="small-btn">+ Nuevo</button>
+      </div>
+      <ul id="goals" class="goals"></ul>
     </section>
 
     <section class="card card-list">
@@ -133,6 +153,72 @@
     </form>
   </dialog>
 
+  <!-- Recurrente: alta y edición -->
+  <dialog id="rec-dialog">
+    <form id="rec-form" method="dialog" autocomplete="off" novalidate>
+      <h2 id="rec-title">Recurrente</h2>
+      <label>Tipo<select name="type"><option value="expense">Gasto</option><option value="income">Ingreso</option></select></label>
+      <label>Importe (€)<input name="amount" inputmode="decimal" placeholder="0,00" required></label>
+      <label>Categoría<select name="category"></select></label>
+      <label>Nota<input name="note" type="text" maxlength="120" placeholder="Alquiler, Netflix…"></label>
+      <div class="row">
+        <label>Se repite<select name="every"><option value="1">Cada mes</option><option value="3">Cada 3 meses</option><option value="6">Cada 6 meses</option><option value="12">Cada año</option></select></label>
+        <label>Próximo cargo<input name="next" type="date" required></label>
+      </div>
+      <div class="row">
+        <label>Ámbito<select name="scope"><option value="personal">Personal</option><option value="business">Agencia</option></select></label>
+        <label>Método de pago<select name="method"></select></label>
+      </div>
+      <label id="rec-group">Grupo<select name="group"></select></label>
+      <p id="rec-msg" class="msg" role="status"></p>
+      <div class="actions">
+        <button type="button" id="rec-delete" class="danger">Quitar</button>
+        <span class="spacer"></span>
+        <button type="button" id="rec-cancel" class="ghost">Cancelar</button>
+        <button type="submit" class="primary">Guardar</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Objetivo de ahorro: alta y edición -->
+  <dialog id="goal-dialog">
+    <form id="goal-form" method="dialog" autocomplete="off" novalidate>
+      <h2 id="goal-title">Objetivo nuevo</h2>
+      <div class="cat-row group-row">
+        <input name="emoji" aria-label="Emoji del objetivo" placeholder="🎯" maxlength="8">
+        <input name="name" aria-label="Nombre del objetivo" placeholder="Fondo de emergencia, viaje…" maxlength="40" required>
+      </div>
+      <div class="row">
+        <label>Meta (€)<input name="target" inputmode="decimal" placeholder="0,00" required></label>
+        <label>Ya ahorrado (€)<input name="saved" inputmode="decimal" placeholder="0,00"></label>
+      </div>
+      <label>Fecha límite (opcional)<input name="deadline" type="date"></label>
+      <p class="hint">Con fecha límite te digo cuánto apartar al mes para llegar.</p>
+      <p id="goal-msg" class="msg" role="status"></p>
+      <div class="actions">
+        <button type="button" id="goal-delete" class="danger">Borrar</button>
+        <span class="spacer"></span>
+        <button type="button" id="goal-cancel" class="ghost">Cancelar</button>
+        <button type="submit" class="primary">Guardar</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Aportar a un objetivo -->
+  <dialog id="save-dialog">
+    <form id="save-form" method="dialog" autocomplete="off" novalidate>
+      <h2 id="save-title">Aportar</h2>
+      <label>Importe (€)<input name="amount" inputmode="decimal" placeholder="0,00" required></label>
+      <p id="save-msg" class="msg" role="status"></p>
+      <div class="actions">
+        <button type="button" id="save-cancel" class="ghost">Cancelar</button>
+        <span class="spacer"></span>
+        <button type="submit" value="out" id="save-out">Sacar</button>
+        <button type="submit" value="in" class="primary" id="save-in">Añadir</button>
+      </div>
+    </form>
+  </dialog>
+
   <!-- Grupo nuevo -->
   <dialog id="group-dialog">
     <form id="group-form" method="dialog" autocomplete="off" novalidate>
@@ -166,7 +252,9 @@
     </details>
 
     <h3>Recurrentes</h3>
+    <p class="hint">Se apuntan solos el día que toca, también si abres la app días después. Cambiar uno vale desde el próximo cargo.</p>
     <ul id="recurring-list" class="recurring"></ul>
+    <button type="button" id="rec-new" class="small-btn rec-new">+ Añadir recurrente</button>
 
     <h3>Botones rápidos</h3>
     <ul id="favorites-list" class="recurring"></ul>
@@ -218,7 +306,7 @@
       <input id="import-file" type="file" accept=".json,.csv,application/json,text/csv" hidden>
     </div>
     <p id="data-msg" class="msg" role="status" aria-live="polite"></p>
-    <p id="app-version" class="app-version">Gastos · versión 1.1</p>
+    <p id="app-version" class="app-version">Gastos · versión 1.2</p>
     <div class="actions"><span class="spacer"></span><button id="data-close" class="ghost">Cerrar</button></div>
   </dialog>
 
