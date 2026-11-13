@@ -766,6 +766,7 @@ $('#btn-data').addEventListener('click', () => {
   renderRecurring();
   renderFavorites();
   renderCategories();
+  renderSyncSection();
   const cfg = sync.getConfig();
   $('#sync-url').value = cfg.url;
   $('#sync-key').value = cfg.key;
@@ -895,6 +896,25 @@ async function runSync() {
     setSyncStatus(`Sin sincronizar: ${err.message}`, true);
   }
 }
+
+// La sincronización es solo para quien tiene su propio n8n: va oculta salvo que ya esté configurada
+// en este dispositivo o se haya desbloqueado tocando 5 veces seguidas el texto de versión.
+const SYNC_UNLOCK = 'sync.unlocked';
+function syncVisible() { return sync.isEnabled() || prefs.get(SYNC_UNLOCK, '') === '1'; }
+function renderSyncSection() { $('#sync-section').hidden = !syncVisible(); }
+let versionTaps = [];
+$('#app-version').addEventListener('click', () => {
+  const now = Date.now();
+  versionTaps = versionTaps.filter((t) => now - t < 3000).concat(now);
+  if (versionTaps.length < 5) return;
+  versionTaps = [];
+  if (sync.isEnabled()) return showMsg($('#data-msg'), 'La sincronización ya está configurada en este dispositivo.');
+  const show = prefs.get(SYNC_UNLOCK, '') !== '1';
+  try { show ? localStorage.setItem('gastos.' + SYNC_UNLOCK, '1') : localStorage.removeItem('gastos.' + SYNC_UNLOCK); } catch { /* sin almacenamiento */ }
+  renderSyncSection();
+  showMsg($('#data-msg'), show ? 'Sincronización visible en este dispositivo.' : 'Sincronización oculta.');
+  if (show) $('#sync-section').scrollIntoView({ block: 'nearest' });
+});
 
 $('#sync-generate').addEventListener('click', () => { $('#sync-key').value = sync.randomKey(); $('#sync-key').select(); });
 

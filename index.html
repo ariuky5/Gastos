@@ -187,18 +187,20 @@
     <p class="hint">Un viaje, un proyecto o un cliente. Lo que apuntes en un grupo cuenta también en Personal o en Agencia. Quitar un grupo no borra sus movimientos.</p>
     <ul id="groups-list" class="recurring"></ul>
 
-    <h3>Sincronización entre dispositivos</h3>
-    <p class="hint">Opcional. Pon la URL del webhook de n8n y la misma clave en todos tus dispositivos. Déjalo vacío para no sincronizar.</p>
-    <label>URL del webhook<input id="sync-url" type="url" inputmode="url" placeholder="https://…/webhook/gastos-sync" autocapitalize="off" autocomplete="off" spellcheck="false"></label>
-    <label>Clave<input id="sync-key" type="password" autocapitalize="off" autocomplete="off" spellcheck="false"></label>
-    <div class="stack">
-      <button id="sync-save" class="primary">Guardar y sincronizar</button>
-      <button id="sync-generate">Generar clave nueva</button>
-    </div>
-    <p id="sync-msg" class="msg" role="status" aria-live="polite"></p>
+    <section id="sync-section" hidden>
+      <h3>Sincronización entre dispositivos</h3>
+      <p class="hint">Opcional. Pon la URL del webhook de n8n y la misma clave en todos tus dispositivos. Déjalo vacío para no sincronizar.</p>
+      <label>URL del webhook<input id="sync-url" type="url" inputmode="url" placeholder="https://…/webhook/gastos-sync" autocapitalize="off" autocomplete="off" spellcheck="false"></label>
+      <label>Clave<input id="sync-key" type="password" autocapitalize="off" autocomplete="off" spellcheck="false"></label>
+      <div class="stack">
+        <button id="sync-save" class="primary">Guardar y sincronizar</button>
+        <button id="sync-generate">Generar clave nueva</button>
+      </div>
+      <p id="sync-msg" class="msg" role="status" aria-live="polite"></p>
+    </section>
 
     <h3>Bloqueo con PIN</h3>
-    <p class="hint">Pide un PIN al abrir la app y al volver tras 1 minuto fuera. Va por dispositivo. Si lo olvidas, borra los datos del sitio en el navegador (si sincronizas, se recuperan desde n8n).</p>
+    <p class="hint">Pide un PIN al abrir la app y al volver tras 1 minuto fuera. Va por dispositivo. Si lo olvidas, tendrás que borrar los datos del sitio en el navegador, así que exporta copias de vez en cuando.</p>
     <form id="pin-form" class="stack" autocomplete="off">
       <label>PIN nuevo (4 a 8 cifras)<input name="pin" type="password" inputmode="numeric" pattern="[0-9]{4,8}" maxlength="8" required></label>
       <label>Repite el PIN<input name="pin2" type="password" inputmode="numeric" pattern="[0-9]{4,8}" maxlength="8" required></label>
@@ -216,6 +218,7 @@
       <input id="import-file" type="file" accept=".json,.csv,application/json,text/csv" hidden>
     </div>
     <p id="data-msg" class="msg" role="status" aria-live="polite"></p>
+    <p id="app-version" class="app-version">Gastos · versión 1.1</p>
     <div class="actions"><span class="spacer"></span><button id="data-close" class="ghost">Cerrar</button></div>
   </dialog>
 

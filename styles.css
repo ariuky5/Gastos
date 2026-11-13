@@ -280,3 +280,6 @@ body.locked > header, body.locked > main, body.locked > footer, body.locked .wat
 .lock-box img { border-radius: 12px; }
 .lock-box input { width: 100%; text-align: center; font-size: 22px; letter-spacing: 6px; }
 .lock-box button { width: 100%; }
+
+/* Texto de versión en Ajustes (5 toques seguidos muestran la sincronización) */
+.app-version { color: var(--muted); font-size: 12px; text-align: center; margin: 16px 0 0; user-select: none; -webkit-user-select: none; -webkit-tap-highlight-color: transparent; }
