@@ -187,7 +187,7 @@ const api = http.createServer((req, res) => {
 
   // Quitar un recurrente en B se propaga a A
   await B.page.click('#btn-data'); await B.page.$$eval('details.fold', (ds) => ds.forEach((d) => { d.open = true; }));
-  await B.page.click('#recurring-list button');
+  await B.page.click('#recurring-list button.danger');
   await B.page.waitForFunction(() => /No tienes ninguno/.test(document.querySelector('#recurring-list').textContent));
   await B.page.click('#data-close');
   await B.page.waitForTimeout(2500);

@@ -18,7 +18,14 @@ Abre la dirección que te indique. Para instalarla en el móvil hay que publicar
 - `sync.js`: sincronización opcional con un webhook de n8n (pull y push, gana el cambio más reciente).
 - `sw.js`: funcionamiento sin conexión. Sube `CACHE` de versión si cambias la lista de archivos.
 - `lock.js`: bloqueo con PIN (solo guarda un hash PBKDF2 con sal).
-- `tests/`: pruebas (`node --test tests/lib.test.mjs` y, con Playwright, `node tests/e2e.cjs`, `hito3`, `hito4`, `hito5`, `hito6`, `grupos`, `sync` y `sync-oculta` `.e2e.cjs`).
+- `tests/`: pruebas (`node --test tests/lib.test.mjs` y, con Playwright, `node tests/e2e.cjs`, `hito3`, `hito4`, `hito5`, `hito6`, `hito7`, `grupos`, `sync` y `sync-oculta` `.e2e.cjs`).
+
+## Recurrentes, objetivos y comparativa
+
+- **Recurrentes** (Ajustes → Recurrentes): se crean marcando «Repetir cada mes» al apuntar o con «+ Añadir recurrente». Se pueden editar (importe, día, nota, cada 1, 3, 6 o 12 meses...) y los cambios valen desde el próximo cargo. Cada cargo generado tiene el id `<recurrente>-<AAAA-MM>` y fecha de cambio fija, así que dos dispositivos sincronizados generan lo mismo y no se duplica.
+- **Avisos de presupuesto**: al 80 % (🟡) y al 100 % (🔴) en la tarjeta del mes y al apuntar; también salen en el resumen semanal por email.
+- **Objetivos de ahorro**: nombre, meta, lo ahorrado y fecha límite opcional (calcula cuánto apartar al mes). Se sincronizan como `meta:goals` y van en la copia JSON. No son movimientos, así que no salen en el CSV.
+- **Comparativa**: gasto por categoría del mes que estás viendo frente al anterior. En el mes en curso compara por defecto los mismos días (del 1 a hoy en los dos meses); se puede cambiar a mes completo.
 
 ## Sincronización entre dispositivos (opcional)
 

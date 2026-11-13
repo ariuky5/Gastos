@@ -4,6 +4,7 @@ import * as lock from './lock.js';
 import {
   METHODS, categoriesFor, emojiFor, formatCents, centsToInput, parseAmount, todayISO, shiftMonth, monthLabel, dayLabel,
   summarize, budgetRows, normalizeExpense, normalizeRecurring, dueRecurring, toCSV, fromCSV, toJSON, fromJSON,
+  EVERY, everyLabel, nextRecurringDate, recurringFromNextDate, normalizeGoals, goalProgress, compareMonths,
   setCategories, getCategories, normalizeCategories, normalizeFavorites, normalizeGroups, scopeOf, scopeLabel, inScope, tagsOf, filterExpenses, sortNewestFirst, monthlySeries, niceMax, shortMonth,
 } from './lib.js';
 
@@ -20,7 +21,7 @@ const state = {
   // Ajustes sincronizables que se guardan enteros: botones rápidos y categorías.
   meta: {
     favorites: { value: [], updatedAt: '', dirty: false }, categories: { value: null, updatedAt: '', dirty: false },
-    groups: { value: [], updatedAt: '', dirty: false },
+    groups: { value: [], updatedAt: '', dirty: false }, goals: { value: [], updatedAt: '', dirty: false },
   },
   month: todayISO().slice(0, 7), editingId: null,
   view: '', // '' = todo, 'personal', 'business' (agencia) o 'g:<id>' (un grupo)
@@ -244,7 +245,7 @@ addForm.addEventListener('submit', async (ev) => {
   if (repeat) {
     const rec = normalizeRecurring({
       amount: expense.amount, category: expense.category, method: expense.method, note: expense.note,
-      type: expense.type, scope: expense.scope, day: Number(expense.date.slice(8)), lastGenerated: expense.date.slice(0, 7),
+      type: expense.type, scope: expense.scope, group: expense.group, day: Number(expense.date.slice(8)), lastGenerated: expense.date.slice(0, 7),
     });
     expense.recurringId = rec.id;
     await saveRecurring(rec);
@@ -431,24 +432,110 @@ async function generateDue() {
   return expenses.length;
 }
 
+const shortDate = (iso) => { const [y, m, d] = iso.split('-').map(Number); return new Date(y, m - 1, d).toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: todayISO().slice(0, 4) === iso.slice(0, 4) ? undefined : 'numeric' }); };
+
 function renderRecurring() {
   const list = $('#recurring-list');
   if (!state.recurring.length) {
-    list.replaceChildren(el('li', { className: 'empty', textContent: 'No tienes ninguno. Marca «Repetir cada mes» al apuntar un gasto o ingreso.' }));
+    list.replaceChildren(el('li', { className: 'empty', textContent: 'No tienes ninguno. Añádelo con el botón de abajo o marca «Repetir cada mes» al apuntar un gasto o ingreso.' }));
     return;
   }
-  list.replaceChildren(...state.recurring.map((r) => {
-    const btn = el('button', { type: 'button', className: 'danger', textContent: 'Quitar' });
-    btn.dataset.id = r.id;
+  const sorted = [...state.recurring].sort((a, b) => nextRecurringDate(a).localeCompare(nextRecurringDate(b)));
+  list.replaceChildren(...sorted.map((r) => {
+    const edit = el('button', { type: 'button', textContent: 'Editar' });
+    edit.dataset.edit = r.id;
+    const remove = el('button', { type: 'button', className: 'danger', textContent: 'Quitar' });
+    remove.dataset.id = r.id;
     const sign = r.type === 'income' ? '+' : '';
-    return el('li', {}, el('span', { textContent: `${emojiFor(r.category)} ${r.note || r.category} · ${sign}${formatCents(r.amount)} · día ${r.day}` }), btn);
+    const every = (r.every || 1) === 1 ? '' : ` · ${everyLabel(r.every)}`;
+    return el('li', {},
+      el('span', { textContent: `${emojiFor(r.category)} ${r.note || r.category} · ${sign}${formatCents(r.amount)} · día ${r.day}${every} · próximo ${shortDate(nextRecurringDate(r))}` }),
+      el('div', { className: 'rec-actions' }, edit, remove));
   }));
 }
 
 $('#recurring-list').addEventListener('click', async (ev) => {
-  const id = ev.target.dataset && ev.target.dataset.id;
+  const btn = ev.target.closest('button');
+  if (!btn) return;
+  if (btn.dataset.edit) return openRecurring(btn.dataset.edit);
+  const id = btn.dataset.id;
   if (!id || !confirm('¿Dejar de repetir este movimiento? Los ya apuntados no se borran.')) return;
   await saveRecurring(tombstone(id));
+  renderRecurring();
+  queueSync();
+});
+
+const recDialog = $('#rec-dialog');
+const recForm = $('#rec-form');
+let editingRec = null; // id del recurrente que se edita (null = nuevo)
+
+function fillRecCategories(type, current) {
+  const cats = categoriesFor(type).map((c) => c.name);
+  if (current && !cats.includes(current)) cats.push(current);
+  fillSelect(recForm.category, cats);
+  if (current) recForm.category.value = current;
+}
+
+function openRecurring(id = null) {
+  const r = id ? state.recurring.find((x) => x.id === id) : null;
+  if (id && !r) return;
+  editingRec = r ? r.id : null;
+  $('#rec-title').textContent = r ? 'Editar recurrente' : 'Recurrente nuevo';
+  $('#rec-delete').hidden = !r;
+  recForm.type.value = r ? r.type : 'expense';
+  fillRecCategories(recForm.type.value, r ? r.category : prefs.get('category.expense', ''));
+  recForm.amount.value = r ? centsToInput(r.amount) : '';
+  recForm.note.value = r ? r.note : '';
+  recForm.every.value = String(r ? r.every || 1 : 1);
+  recForm.next.value = r ? nextRecurringDate(r) : todayISO();
+  recForm.next.dataset.initial = recForm.next.value;
+  recForm.scope.value = r ? scopeOf(r) : 'personal';
+  fillSelect(recForm.method, r && !METHODS.includes(r.method) ? [...METHODS, r.method] : METHODS);
+  recForm.method.value = r ? r.method : prefs.get('method', METHODS[0]);
+  groupOptions(recForm.group, r && r.group);
+  $('#rec-group').hidden = !state.meta.groups.value.length;
+  showMsg($('#rec-msg'), r ? '' : 'Si el próximo cargo es hoy o una fecha pasada, se apunta al guardar.');
+  recDialog.showModal();
+  recForm.amount.focus();
+}
+
+$('#rec-new').addEventListener('click', () => openRecurring());
+$('#rec-cancel').addEventListener('click', () => recDialog.close());
+recForm.type.addEventListener('change', () => fillRecCategories(recForm.type.value));
+recForm.group.addEventListener('change', () => { const g = groupById(recForm.group.value); if (g) recForm.scope.value = g.scope; });
+recForm.scope.addEventListener('change', () => { const g = groupById(recForm.group.value); if (g && g.scope !== recForm.scope.value) recForm.group.value = ''; });
+
+recForm.addEventListener('submit', async (ev) => {
+  ev.preventDefault();
+  const mine = editingRec ? state.recurring.find((x) => x.id === editingRec) : null;
+  let rec;
+  try {
+    const every = Number(recForm.every.value);
+    // Si no se ha tocado la fecha se conserva el día original (un "día 31" sigue siendo fin de mes).
+    const keepDate = mine && recForm.next.value === recForm.next.dataset.initial;
+    const when = keepDate ? { day: mine.day, lastGenerated: shiftMonth(nextRecurringDate(mine).slice(0, 7), -every) } : recurringFromNextDate(recForm.next.value, every);
+    rec = normalizeRecurring({
+      ...(mine || {}), ...when, every, type: recForm.type.value, amount: recForm.amount.value,
+      category: recForm.category.value, note: recForm.note.value, method: recForm.method.value,
+      ...groupFields(recForm.group.value, recForm.scope.value), updatedAt: nowISO(),
+    });
+  } catch (err) {
+    return showMsg($('#rec-msg'), err.message, true);
+  }
+  if (!rec.group) delete rec.group;
+  await saveRecurring(rec);
+  const created = await generateDue();
+  recDialog.close();
+  renderRecurring();
+  render();
+  queueSync();
+  showMsg($('#data-msg'), `${mine ? 'Recurrente guardado' : 'Recurrente añadido'}: próximo cargo el ${shortDate(nextRecurringDate(state.recurringAll.find((x) => x.id === rec.id)))}.${created ? ` Se ${created === 1 ? 'ha apuntado 1 movimiento' : `han apuntado ${created} movimientos`}.` : ''}`);
+});
+
+$('#rec-delete').addEventListener('click', async () => {
+  if (!editingRec || !confirm('¿Dejar de repetir este movimiento? Los ya apuntados no se borran.')) return;
+  await saveRecurring(tombstone(editingRec));
+  recDialog.close();
   renderRecurring();
   queueSync();
 });
@@ -574,9 +661,175 @@ function render() {
       el('div', { className: 'bar ' + (r.level || '') }, fill));
   }));
 
+  renderCompare();
+  renderGoals();
   renderChart();
   renderList(items);
 }
+
+// ---------- Comparativa con el mes anterior ----------
+const MONTH_NAMES = (ym) => new Date(Number(ym.slice(0, 4)), Number(ym.slice(5)) - 1, 1).toLocaleDateString('es-ES', { month: 'long' });
+
+/** Texto y color de una diferencia. Para gastos, subir es peor; para ingresos, mejor. */
+function diffCell(r, moreIsBetter = false) {
+  const node = el('span', { className: 'cmp-diff' });
+  if (r.diff === 0) { node.textContent = r.current ? 'igual' : '—'; return node; }
+  const up = r.diff > 0;
+  node.classList.add(up === moreIsBetter ? 'better' : 'worse');
+  const pct = r.pct === null ? 'nuevo' : `${up ? '+' : ''}${r.pct} %`;
+  node.textContent = `${up ? '▲' : '▼'} ${formatCents(Math.abs(r.diff))} · ${pct}`;
+  return node;
+}
+
+function renderCompare() {
+  const isCurrent = state.month === todayISO().slice(0, 7);
+  const day = Number(todayISO().slice(8));
+  const mode = prefs.get('cmp', 'days');
+  $('#cmp-mode').hidden = !isCurrent;
+  const radio = document.querySelector(`#cmp-mode input[value="${mode === 'full' ? 'full' : 'days'}"]`);
+  if (radio) radio.checked = true;
+  const uptoDay = isCurrent && mode !== 'full' ? day : null;
+  const { prevYm, rows, total, income } = compareMonths(visible(), state.month, uptoDay);
+  const range = uptoDay ? (uptoDay === 1 ? ' (solo el día 1)' : ` (del 1 al ${uptoDay} de cada mes)`) : '';
+  $('#cmp-sub').textContent = `${MONTH_NAMES(state.month)} frente a ${MONTH_NAMES(prevYm)}${range}`;
+  const list = $('#cmp-rows');
+  if (!rows.length && !income.current && !income.previous) {
+    list.replaceChildren(el('li', { className: 'empty', textContent: `Sin movimientos en ${MONTH_NAMES(state.month)} ni en ${MONTH_NAMES(prevYm)} para comparar.` }));
+    return;
+  }
+  const line = (cls, name, r, moreIsBetter) => el('li', { className: cls },
+    el('span', { className: 'cmp-name', textContent: name }), el('span', { className: 'cmp-amt', textContent: formatCents(r.current) }),
+    el('span', { className: 'cmp-before', textContent: `antes ${formatCents(r.previous)}` }), diffCell(r, moreIsBetter));
+  list.replaceChildren(
+    line('cmp-total', 'Total gastos', total, false),
+    ...rows.map((r) => line('', `${emojiFor(r.category)} ${r.category}`, r, false)),
+    ...(income.current || income.previous ? [line('cmp-income', 'Ingresos', income, true)] : []));
+}
+$('#cmp-mode').addEventListener('change', (ev) => { prefs.set('cmp', ev.target.value); renderCompare(); });
+
+// ---------- Objetivos de ahorro ----------
+const goalById = (id) => state.meta.goals.value.find((g) => g.id === id);
+const monthYear = (iso) => new Date(Number(iso.slice(0, 4)), Number(iso.slice(5, 7)) - 1, 1).toLocaleDateString('es-ES', { month: 'long', year: 'numeric' });
+
+function renderGoals() {
+  const goals = state.meta.goals.value;
+  const list = $('#goals');
+  if (!goals.length) {
+    list.replaceChildren(el('li', { className: 'empty', textContent: 'Aún no tienes objetivos. Crea uno con «+ Nuevo»: nombre, meta y, si quieres, fecha límite.' }));
+    return;
+  }
+  list.replaceChildren(...goals.map((g) => {
+    const p = goalProgress(g);
+    const open = el('button', { type: 'button', className: 'goal-open' },
+      el('span', { className: 'goal-name', textContent: `${g.emoji} ${g.name}` }),
+      el('span', { className: 'goal-amt', textContent: `${formatCents(g.saved)} de ${formatCents(g.target)}` }));
+    open.dataset.edit = g.id;
+    open.setAttribute('aria-label', `Editar objetivo ${g.name}: ${formatCents(g.saved)} de ${formatCents(g.target)}`);
+    const fill = el('i');
+    fill.style.width = Math.min(p.pct, 100) + '%';
+    const bar = el('div', { className: 'bar' + (p.done ? ' done' : ''), role: 'progressbar' });
+    bar.setAttribute('aria-valuenow', String(Math.min(p.pct, 100)));
+    bar.setAttribute('aria-valuemin', '0');
+    bar.setAttribute('aria-valuemax', '100');
+    bar.setAttribute('aria-label', `${g.name}: ${p.pct} %`);
+    bar.append(fill);
+    let info = `${p.pct} %`;
+    if (p.done) info += ' · 🎉 conseguido';
+    else {
+      info += ` · faltan ${formatCents(p.left)}`;
+      if (p.late) info += ` · plazo pasado (${shortDate(g.deadline)})`;
+      else if (p.perMonth) info += ` · ${formatCents(p.perMonth)}/mes hasta ${monthYear(g.deadline)}`;
+    }
+    const add = el('button', { type: 'button', textContent: '+ Aportar' });
+    add.dataset.add = g.id;
+    add.setAttribute('aria-label', `Aportar a ${g.name}`);
+    return el('li', {}, open, bar, el('div', { className: 'goal-foot' }, el('small', { className: p.late ? 'late' : '', textContent: info }), add));
+  }));
+}
+
+const goalDialog = $('#goal-dialog');
+const goalForm = $('#goal-form');
+const saveDialog = $('#save-dialog');
+const saveForm = $('#save-form');
+let editingGoal = null;
+
+function openGoal(id = null) {
+  const g = id ? goalById(id) : null;
+  editingGoal = g ? g.id : null;
+  goalForm.reset();
+  $('#goal-title').textContent = g ? 'Editar objetivo' : 'Objetivo nuevo';
+  $('#goal-delete').hidden = !g;
+  if (g) {
+    goalForm.emoji.value = g.emoji;
+    goalForm.name.value = g.name;
+    goalForm.target.value = centsToInput(g.target);
+    goalForm.saved.value = g.saved ? centsToInput(g.saved) : '';
+    goalForm.deadline.value = g.deadline || '';
+  }
+  showMsg($('#goal-msg'), '');
+  goalDialog.showModal();
+  if (!g) goalForm.name.focus();
+}
+
+async function saveGoals(list) {
+  await saveMeta('goals', normalizeGoals(list));
+  renderGoals();
+  queueSync();
+}
+
+$('#goal-new').addEventListener('click', () => openGoal());
+$('#goal-cancel').addEventListener('click', () => goalDialog.close());
+$('#goals').addEventListener('click', (ev) => {
+  const btn = ev.target.closest('button');
+  if (!btn) return;
+  if (btn.dataset.edit) return openGoal(btn.dataset.edit);
+  const g = btn.dataset.add && goalById(btn.dataset.add);
+  if (!g) return;
+  saveForm.reset();
+  saveForm.dataset.id = g.id;
+  $('#save-title').textContent = `Aportar a ${g.emoji} ${g.name}`;
+  showMsg($('#save-msg'), `Llevas ${formatCents(g.saved)} de ${formatCents(g.target)}.`);
+  saveDialog.showModal();
+  saveForm.amount.focus();
+});
+
+goalForm.addEventListener('submit', async (ev) => {
+  ev.preventDefault();
+  const name = goalForm.name.value.trim();
+  const target = parseAmount(goalForm.target.value);
+  const savedText = goalForm.saved.value.trim();
+  const saved = savedText ? parseAmount(savedText) : 0;
+  if (!name) return showMsg($('#goal-msg'), 'Ponle un nombre.', true);
+  if (!target) return showMsg($('#goal-msg'), 'La meta tiene que ser un importe mayor que 0.', true);
+  if (savedText && saved === null && !/^0+([,.]0+)?$/.test(savedText)) return showMsg($('#goal-msg'), 'Lo ahorrado no es un importe válido.', true);
+  const goal = { id: editingGoal || undefined, name, emoji: goalForm.emoji.value, target, saved: saved || 0, deadline: goalForm.deadline.value || undefined };
+  const list = state.meta.goals.value;
+  await saveGoals(editingGoal ? list.map((g) => (g.id === editingGoal ? goal : g)) : [...list, goal]);
+  goalDialog.close();
+});
+
+$('#goal-delete').addEventListener('click', async () => {
+  const g = editingGoal && goalById(editingGoal);
+  if (!g || !confirm(`¿Borrar el objetivo «${g.name}»? Solo se borra el objetivo, no tus movimientos.`)) return;
+  await saveGoals(state.meta.goals.value.filter((x) => x.id !== g.id));
+  goalDialog.close();
+});
+
+$('#save-cancel').addEventListener('click', () => saveDialog.close());
+saveForm.addEventListener('submit', async (ev) => {
+  ev.preventDefault();
+  const g = goalById(saveForm.dataset.id);
+  if (!g) return saveDialog.close();
+  const cents = parseAmount(saveForm.amount.value);
+  if (!cents) return showMsg($('#save-msg'), 'Escribe un importe mayor que 0.', true);
+  const out = ev.submitter && ev.submitter.value === 'out';
+  if (out && cents > g.saved) return showMsg($('#save-msg'), `Solo llevas ${formatCents(g.saved)} en este objetivo.`, true);
+  const saved = g.saved + (out ? -cents : cents);
+  await saveGoals(state.meta.goals.value.map((x) => (x.id === g.id ? { ...x, saved } : x)));
+  saveDialog.close();
+  const p = goalProgress({ ...g, saved });
+  showMsg($('#add-msg'), p.done ? `🎉 Objetivo «${g.name}» conseguido: ${formatCents(saved)}.` : `${g.name}: ${formatCents(saved)} de ${formatCents(g.target)} (${p.pct} %).`);
+});
 
 // ---------- Gráfico de evolución (SVG hecho a mano, sin librerías) ----------
 const SVG = 'http://www.w3.org/2000/svg';
@@ -777,7 +1030,7 @@ $('#btn-data').addEventListener('click', () => {
   dataDialog.showModal();
 });
 $('#data-close').addEventListener('click', () => dataDialog.close());
-$('#export-json').addEventListener('click', () => download(`gastos-${todayISO()}.json`, toJSON(state.expenses, state.budgets, state.recurring, { favorites: state.meta.favorites.value, categories: state.meta.categories.value, groups: state.meta.groups.value }), 'application/json'));
+$('#export-json').addEventListener('click', () => download(`gastos-${todayISO()}.json`, toJSON(state.expenses, state.budgets, state.recurring, { favorites: state.meta.favorites.value, categories: state.meta.categories.value, groups: state.meta.groups.value, goals: state.meta.goals.value }), 'application/json'));
 $('#export-csv').addEventListener('click', () => download(`gastos-${state.view ? viewLabel().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '-') + '-' : ''}${todayISO()}.csv`, toCSV(visible()), 'text/csv;charset=utf-8'));
 $('#import-btn').addEventListener('click', () => $('#import-file').click());
 
@@ -788,8 +1041,8 @@ $('#import-file').addEventListener('change', async (ev) => {
   const msg = $('#data-msg');
   const text = await file.text();
   const isJSON = file.name.toLowerCase().endsWith('.json') || /^\s*[\[{]/.test(text);
-  const { expenses, errors, budgets = {}, recurring = [], favorites = [], categories = null, groups = [] } = isJSON ? fromJSON(text) : fromCSV(text);
-  if (!expenses.length && !recurring.length && !Object.keys(budgets).length && !favorites.length && !categories && !groups.length) {
+  const { expenses, errors, budgets = {}, recurring = [], favorites = [], categories = null, groups = [], goals = [] } = isJSON ? fromJSON(text) : fromCSV(text);
+  if (!expenses.length && !recurring.length && !Object.keys(budgets).length && !favorites.length && !categories && !groups.length && !goals.length) {
     return showMsg(msg, errors[0] || 'No se ha encontrado ningún movimiento en el archivo.', true);
   }
   // Fusión por id: lo importado sustituye a lo que tenga el mismo id; el resto se añade.
@@ -817,6 +1070,10 @@ $('#import-file').addEventListener('change', async (ev) => {
   if (favorites.length) {
     const mine = new Set(state.meta.favorites.value.map((f) => f.id));
     await saveMeta('favorites', [...state.meta.favorites.value, ...favorites.filter((f) => !mine.has(f.id))]);
+  }
+  if (goals.length) {
+    const mine = new Set(state.meta.goals.value.map((g) => g.id));
+    await saveMeta('goals', [...state.meta.goals.value, ...goals.filter((g) => !mine.has(g.id))]);
   }
   renderFavorites();
   renderCategories();
@@ -1031,7 +1288,8 @@ async function start() {
   setPrivate(prefs.get('private', 'off') === 'on');
   try {
     // Las categorías y los grupos van primero: el formulario de alta los necesita.
-    const [favorites, categories, groups] = await Promise.all([db.getMeta('m:favorites', null), db.getMeta('m:categories', null), db.getMeta('m:groups', null)]);
+    const [favorites, categories, groups, goals] = await Promise.all([db.getMeta('m:favorites', null), db.getMeta('m:categories', null), db.getMeta('m:groups', null), db.getMeta('m:goals', null)]);
+    if (goals) state.meta.goals = goals;
     if (favorites) state.meta.favorites = favorites;
     if (categories) { state.meta.categories = categories; setCategories(categories.value); }
     if (groups) state.meta.groups = groups;

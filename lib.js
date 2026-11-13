@@ -236,10 +236,72 @@ export function niceMax(cents) {
   return (lead <= 1 ? 1 : lead <= 2 ? 2 : lead <= 5 ? 5 : 10) * pow;
 }
 
+// ---------- Objetivos de ahorro ----------
+/** Limpia la lista de objetivos { id, name, emoji, target, saved, deadline? } (importes en céntimos). */
+export function normalizeGoals(raw) {
+  const out = [];
+  for (const g of Array.isArray(raw) ? raw : []) {
+    const name = String((g && g.name) || '').trim().slice(0, 40);
+    if (!name || !Number.isInteger(g.target) || g.target <= 0) continue;
+    const goal = {
+      id: String(g.id || crypto.randomUUID()), name, target: g.target,
+      saved: Number.isInteger(g.saved) && g.saved > 0 ? g.saved : 0,
+      emoji: [...String(g.emoji || '').trim()].slice(0, 4).join('') || '🎯',
+    };
+    if (isISODate(g.deadline)) goal.deadline = g.deadline;
+    out.push(goal);
+  }
+  return out;
+}
+
+/** Cifras de un objetivo: porcentaje, lo que falta y, si tiene fecha, cuánto apartar al mes (contando el mes en curso). */
+export function goalProgress(goal, today = todayISO()) {
+  const left = Math.max(goal.target - goal.saved, 0);
+  const pct = Math.floor((goal.saved * 100) / goal.target);
+  const done = left === 0;
+  let months = null, perMonth = null, late = false;
+  if (goal.deadline && !done) {
+    const [y1, m1] = today.slice(0, 7).split('-').map(Number);
+    const [y2, m2] = goal.deadline.slice(0, 7).split('-').map(Number);
+    months = (y2 - y1) * 12 + (m2 - m1) + 1;
+    if (goal.deadline < today || months < 1) late = true;
+    else perMonth = Math.ceil(left / months);
+  }
+  return { pct, left, done, months, perMonth, late };
+}
+
+// ---------- Comparativa con el mes anterior ----------
+/**
+ * Gasto por categoría de un mes frente al anterior. Con uptoDay, solo cuenta del día 1 a ese día en los dos meses
+ * (sirve para comparar el mes en curso de forma justa). Devuelve { prevYm, rows, total, income }.
+ */
+export function compareMonths(expenses, ym, uptoDay = null) {
+  const prevYm = shiftMonth(ym, -1);
+  const inRange = (e, month) => e.date.startsWith(month) && (!uptoDay || Number(e.date.slice(8)) <= uptoDay);
+  const map = new Map();
+  const total = { current: 0, previous: 0 }, income = { current: 0, previous: 0 };
+  for (const e of expenses) {
+    const which = inRange(e, ym) ? 'current' : inRange(e, prevYm) ? 'previous' : null;
+    if (!which) continue;
+    if (e.type === 'income') { income[which] += e.amount; continue; }
+    total[which] += e.amount;
+    if (!map.has(e.category)) map.set(e.category, { category: e.category, current: 0, previous: 0 });
+    map.get(e.category)[which] += e.amount;
+  }
+  const withDiff = (r) => ({ ...r, diff: r.current - r.previous, pct: r.previous ? Math.round(((r.current - r.previous) * 100) / r.previous) : null });
+  const rows = [...map.values()].map(withDiff)
+    .sort((a, b) => Math.max(b.current, b.previous) - Math.max(a.current, a.previous) || a.category.localeCompare(b.category, 'es'));
+  return { prevYm, rows, total: withDiff(total), income: withDiff(income) };
+}
+
 // ---------- Recurrentes ----------
 const isYM = (s) => /^\d{4}-(0[1-9]|1[0-2])$/.test(s);
 
-/** Valida un recurrente: { id, amount, category, method, note, type, day, lastGenerated }. */
+/** Cada cuántos meses se repite un recurrente: 1 (mensual), 3 (trimestral), 6 (semestral) o 12 (anual). */
+export const EVERY = [1, 3, 6, 12];
+export const everyLabel = (n) => ({ 1: 'cada mes', 3: 'cada 3 meses', 6: 'cada 6 meses', 12: 'cada año' })[n] || 'cada mes';
+
+/** Valida un recurrente: { id, amount, category, method, note, type, day, every, lastGenerated, group? }. */
 export function normalizeRecurring(raw) {
   const amount = typeof raw.amount === 'number' && Number.isInteger(raw.amount) ? raw.amount : parseAmount(raw.amount);
   if (!amount || amount <= 0) throw new Error('Importe no válido');
@@ -247,14 +309,29 @@ export function normalizeRecurring(raw) {
   if (!Number.isInteger(day) || day < 1 || day > 31) throw new Error('Día no válido');
   if (!isYM(raw.lastGenerated)) throw new Error('Mes no válido');
   const type = raw.type === 'income' ? 'income' : 'expense';
-  return {
+  const every = EVERY.includes(Number(raw.every)) ? Number(raw.every) : 1;
+  const rec = {
     id: raw.id || crypto.randomUUID(),
     updatedAt: raw.updatedAt || new Date().toISOString(),
-    amount, day, type, scope: scopeOf(raw), lastGenerated: raw.lastGenerated,
+    amount, day, every, type, scope: scopeOf(raw), lastGenerated: raw.lastGenerated,
     category: String(raw.category || (type === 'income' ? 'Otros ingresos' : 'Otros')).trim(),
     method: String(raw.method || METHODS[0]).trim() || METHODS[0],
     note: String(raw.note || '').trim().slice(0, 120),
   };
+  if (raw.group) rec.group = String(raw.group);
+  return rec;
+}
+
+/** Fecha del próximo cargo de un recurrente (el mes siguiente al último generado, según su periodicidad). */
+export function nextRecurringDate(rec) {
+  const ym = shiftMonth(rec.lastGenerated, rec.every || 1);
+  return `${ym}-${String(Math.min(rec.day, daysInMonth(ym))).padStart(2, '0')}`;
+}
+
+/** Datos de un recurrente a partir de la fecha de su próximo cargo: el día y el "último mes generado" que toca. */
+export function recurringFromNextDate(date, every = 1) {
+  if (!isISODate(date)) throw new Error('Fecha no válida');
+  return { day: Number(date.slice(8)), lastGenerated: shiftMonth(date.slice(0, 7), -(EVERY.includes(Number(every)) ? Number(every) : 1)) };
 }
 
 const daysInMonth = (ym) => { const [y, m] = ym.split('-').map(Number); return new Date(y, m, 0).getDate(); };
@@ -270,7 +347,7 @@ export function dueRecurring(recurring, today = todayISO(), existingIds = new Se
     if (rec.deleted) return rec;
     let last = rec.lastGenerated;
     for (let i = 0; i < 240; i++) {
-      const ym = shiftMonth(last, 1);
+      const ym = shiftMonth(last, rec.every || 1);
       const date = `${ym}-${String(Math.min(rec.day, daysInMonth(ym))).padStart(2, '0')}`;
       if (date > today) break;
       const id = `${rec.id}-${ym}`;
@@ -280,7 +357,7 @@ export function dueRecurring(recurring, today = todayISO(), existingIds = new Se
       if (!existingIds.has(id)) {
         expenses.push(normalizeExpense({
           id, amount: rec.amount, category: rec.category, method: rec.method,
-          note: rec.note, type: rec.type, scope: rec.scope, date, recurringId: rec.id, createdAt: stamp, updatedAt: stamp,
+          note: rec.note, type: rec.type, scope: rec.scope, group: rec.group, date, recurringId: rec.id, createdAt: stamp, updatedAt: stamp,
         }));
       }
       last = ym;
@@ -374,12 +451,13 @@ export function fromCSV(text) {
   return { expenses, errors };
 }
 
-// ---------- JSON (copia completa: movimientos, presupuestos y recurrentes) ----------
+// ---------- JSON (copia completa: movimientos, presupuestos, recurrentes, objetivos y ajustes) ----------
 export const toJSON = (expenses, budgets = {}, recurring = [], extra = {}) =>
   JSON.stringify({
     app: 'gastos', version: 3, exportedAt: new Date().toISOString(),
     expenses: expenses.map(clean), budgets, recurring: recurring.map(clean),
     favorites: extra.favorites || [], categories: extra.categories || null, groups: extra.groups || [],
+    goals: extra.goals || [],
   }, null, 2);
 
 export function fromJSON(text) {
@@ -400,13 +478,14 @@ export function fromJSON(text) {
     favorites: normalizeFavorites(data.favorites),
     categories: Array.isArray(data.categories) && data.categories.length ? normalizeCategories(data.categories) : null,
     groups: normalizeGroups(data.groups),
+    goals: normalizeGoals(data.goals),
   };
 }
 
 // ---------- Sincronización ----------
 // Cada cosa sincronizable viaja como una fila { id, data, updatedAt, deleted }.
 // Ids: el del movimiento tal cual, "rec:<id>" para recurrentes y "meta:<clave>" para presupuestos,
-// botones rápidos (favorites), categorías y grupos.
+// botones rápidos (favorites), categorías, grupos y objetivos de ahorro (goals).
 // Regla de conflicto: gana la versión con "updatedAt" más reciente.
 
 /** Quita los campos internos que no deben salir del dispositivo. */
@@ -433,14 +512,15 @@ export const remoteWins = (row, local) => !local || String(row.updatedAt) > Stri
 export function fromRow(row) {
   if (!row || typeof row.id !== 'string' || typeof row.updatedAt !== 'string') return null;
   const metaKey = row.id.startsWith('meta:') ? row.id.slice(5) : '';
-  const kind = metaKey === 'budgets' ? 'budgets' : metaKey === 'favorites' || metaKey === 'categories' || metaKey === 'groups' ? 'meta'
+  const kind = metaKey === 'budgets' ? 'budgets' : ['favorites', 'categories', 'groups', 'goals'].includes(metaKey) ? 'meta'
     : metaKey ? null : row.id.startsWith('rec:') ? 'recurring' : 'expense';
   if (!kind) return null;
   if (kind === 'meta') {
     if (row.deleted) return null;
     try {
       const data = JSON.parse(row.data);
-      const value = metaKey === 'favorites' ? normalizeFavorites(data.value) : metaKey === 'groups' ? normalizeGroups(data.value) : normalizeCategories(data.value);
+      const value = metaKey === 'favorites' ? normalizeFavorites(data.value) : metaKey === 'groups' ? normalizeGroups(data.value)
+        : metaKey === 'goals' ? normalizeGoals(data.value) : normalizeCategories(data.value);
       return { kind, record: { key: metaKey, value, updatedAt: row.updatedAt, dirty: false } };
     } catch { return null; }
   }

@@ -11,6 +11,7 @@
   }
 }
 * { box-sizing: border-box; }
+[hidden] { display: none !important; } /* que ningún display de las clases gane al atributo hidden */
 html { -webkit-text-size-adjust: 100%; }
 body {
   margin: 0; background: var(--bg); color: var(--text);
@@ -203,6 +204,7 @@ dialog h3 { font-size: 15px; margin: 20px 0 6px; }
     grid-template-areas:
       "add view    view"
       "add summary chart"
+      "add compare goals"
       "add list    list"
       "add status  status";
     align-items: start; gap: 16px;
@@ -211,6 +213,8 @@ dialog h3 { font-size: 15px; margin: 20px 0 6px; }
   #view { grid-area: view; max-width: 100%; justify-self: start; }
   .card-summary { grid-area: summary; }
   .card-chart { grid-area: chart; }
+  .card-compare { grid-area: compare; }
+  .card-goals { grid-area: goals; }
   .card-list { grid-area: list; }
   #sync-status { grid-area: status; text-align: left; }
   .card { padding: 20px; }
@@ -247,7 +251,7 @@ h1 { display: flex; align-items: center; gap: 10px; }
 
 /* Modo privado: los importes se difuminan, el resto se ve igual. */
 body.private :is(#month-total, #month-income, #month-balance, .amt, .day span:last-child, .by-cat .line span:last-child,
-  #alerts, #chart-detail, .chart svg text:not(.current), #chart-rows td:not(:first-child), #filter-summary span,
+  #alerts, #chart-detail, .cmp-amt, .cmp-diff, .cmp-before, .goal-amt, .goal-foot small, #cmp-sub, .chart svg text:not(.current), #chart-rows td:not(:first-child), #filter-summary span,
   .fav b, #add-msg, #recurring-list span, #favorites-list span, #budgets input) {
   filter: blur(7px); user-select: none;
 }
@@ -283,3 +287,37 @@ body.locked > header, body.locked > main, body.locked > footer, body.locked .wat
 
 /* Texto de versión en Ajustes (5 toques seguidos muestran la sincronización) */
 .app-version { color: var(--muted); font-size: 12px; text-align: center; margin: 16px 0 0; user-select: none; -webkit-user-select: none; -webkit-tap-highlight-color: transparent; }
+
+/* ---- Comparativa con el mes anterior ---- */
+.small-btn { min-height: 36px; padding: 4px 12px; font-size: 14px; }
+.card-compare .seg.small { flex: 0 0 auto; }
+.card-compare .seg.small label { white-space: nowrap; }
+.cmp-sub { margin: -4px 0 0; }
+.cmp-sub::first-letter { text-transform: uppercase; }
+.cmp { list-style: none; margin: 0; padding: 0; display: grid; font-size: 14px; }
+.cmp li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 12px; padding: 8px 0; border-top: 1px solid var(--line); }
+.cmp li:first-child { border-top: 0; padding-top: 0; }
+.cmp li.cmp-total { font-weight: 600; }
+.cmp li.cmp-income { border-top: 1px dashed var(--line); }
+.cmp .cmp-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cmp .cmp-amt { text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.cmp .cmp-before { color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; }
+.cmp .cmp-diff { text-align: right; font-size: 13px; font-variant-numeric: tabular-nums; white-space: nowrap; color: var(--muted); }
+.cmp .cmp-diff.worse { color: var(--danger); }
+.cmp .cmp-diff.better { color: var(--ok); }
+
+/* ---- Objetivos de ahorro ---- */
+.goals { list-style: none; margin: 0; padding: 0; display: grid; gap: 14px; }
+.goals li { display: grid; gap: 6px; }
+.goals .empty { font-size: 14px; }
+.goal-open { display: flex; justify-content: space-between; gap: 8px; width: 100%; min-height: 32px; padding: 0; border: 0; background: transparent; text-align: left; font-size: 15px; }
+.goal-open .goal-name { font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.goal-open .goal-amt { font-variant-numeric: tabular-nums; white-space: nowrap; color: var(--muted); font-size: 14px; }
+.bar.done i { background: var(--ok); }
+.goal-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.goal-foot small { color: var(--muted); font-size: 13px; }
+.goal-foot small.late { color: var(--danger); }
+.goal-foot button { min-height: 36px; padding: 4px 12px; font-size: 14px; flex: 0 0 auto; }
+.rec-new { margin-top: 8px; }
+.recurring li .rec-actions { display: flex; gap: 6px; flex: 0 0 auto; }
+.recurring li .rec-actions button { min-height: 36px; padding: 4px 10px; font-size: 13px; }

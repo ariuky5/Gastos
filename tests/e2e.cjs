@@ -216,7 +216,7 @@ const server = http.createServer((req, res) => {
   assert.deepEqual(full.budgets, { Comida: 300 });
   assert.equal(full.recurring.length, 1);
   assert.equal(full.recurring[0].lastGenerated, monthsAgo(0));
-  await page.click('#recurring-list button');
+  await page.click('#recurring-list button.danger');
   await page.waitForFunction(() => /No tienes ninguno/.test(document.querySelector('#recurring-list').textContent));
   await page.click('#data-close');
   step('copia completa y quitar recurrente');
