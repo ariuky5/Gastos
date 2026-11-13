@@ -1,5 +1,5 @@
 // Service worker: red primero (así las actualizaciones llegan solas) y caché si no hay conexión.
-const CACHE = 'gastos-v9';
+const CACHE = 'gastos-v10';
 const SHELL = ['./', 'index.html', 'styles.css', 'app.js', 'db.js', 'lib.js', 'sync.js', 'lock.js', 'manifest.webmanifest',
   'icons/icon.svg', 'icons/icon-192.png', 'icons/icon-512.png'];
 

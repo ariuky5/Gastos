@@ -58,6 +58,8 @@ const api = http.createServer((req, res) => {
 
   async function device(name) {
     const ctx = await browser.newContext({ ...devices['iPhone 13'], locale: 'es-ES' });
+    // La sincronización va oculta por defecto: estos dispositivos de prueba la tienen desbloqueada.
+    await ctx.addInitScript(() => localStorage.setItem('gastos.sync.unlocked', '1'));
     const page = await ctx.newPage();
     page.on('pageerror', (e) => errors.push(`${name}: ${e}`));
     page.on('dialog', (d) => d.accept());

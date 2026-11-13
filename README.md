@@ -18,11 +18,13 @@ Abre la dirección que te indique. Para instalarla en el móvil hay que publicar
 - `sync.js`: sincronización opcional con un webhook de n8n (pull y push, gana el cambio más reciente).
 - `sw.js`: funcionamiento sin conexión. Sube `CACHE` de versión si cambias la lista de archivos.
 - `lock.js`: bloqueo con PIN (solo guarda un hash PBKDF2 con sal).
-- `tests/`: pruebas (`node --test tests/lib.test.mjs` y, con Playwright, `node tests/e2e.cjs`, `hito3`, `hito4`, `hito5`, `hito6`, `grupos` y `sync` `.e2e.cjs`).
+- `tests/`: pruebas (`node --test tests/lib.test.mjs` y, con Playwright, `node tests/e2e.cjs`, `hito3`, `hito4`, `hito5`, `hito6`, `grupos`, `sync` y `sync-oculta` `.e2e.cjs`).
 
 ## Sincronización entre dispositivos (opcional)
 
 La app habla con el workflow de n8n «Gastos - Sincronización», que guarda los datos en la tabla `gastos_sync`.
+
+El apartado va **oculto** en Ajustes para quien use la app sin n8n. Se ve solo si el dispositivo ya tiene URL y clave guardadas, o tras tocar 5 veces seguidas el texto «Gastos · versión» al final de Ajustes (se recuerda en ese dispositivo; otros 5 toques lo vuelven a ocultar mientras no esté configurado). Sin URL y clave no se hace ninguna petición a n8n.
 
 1. En la app: Ajustes → «Generar clave nueva» y copia la clave.
 2. En n8n: en el nodo «Sync Webhook» crea una credencial *Header Auth* con nombre `X-Gastos-Key` y esa clave como valor. Publica el workflow.
