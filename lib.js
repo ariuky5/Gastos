@@ -48,9 +48,19 @@ export function normalizeGroups(raw) {
 }
 
 // ---------- Categorías (editables) ----------
+// Fiado (dinero que prestas y te tienen que devolver) y Deudas (dinero que debes tú). Existen como gasto y como ingreso:
+// Fiado + gasto = prestas; Fiado + ingreso = te lo devuelven; Deudas + ingreso = te prestan; Deudas + gasto = pagas.
+// Se reconocen por "kind", así que se pueden renombrar, pero no quitar.
+const DEBT_CATEGORIES = [
+  { name: 'Fiado', emoji: '🤝', type: 'expense', kind: 'lent' },
+  { name: 'Deudas', emoji: '💸', type: 'expense', kind: 'owed' },
+  { name: 'Fiado', emoji: '🤝', type: 'income', kind: 'lent' },
+  { name: 'Deudas', emoji: '💸', type: 'income', kind: 'owed' },
+];
 const DEFAULT_CATEGORIES = [
   ...CATEGORIES.map((c) => ({ ...c, type: 'expense' })),
   ...INCOME_CATEGORIES.map((c) => ({ ...c, type: 'income' })),
+  ...DEBT_CATEGORIES,
 ];
 
 /** Limpia una lista de categorías { name, emoji, type }. Garantiza al menos una de gasto y una de ingreso. */
@@ -62,10 +72,18 @@ export function normalizeCategories(raw) {
     const type = c && c.type === 'income' ? 'income' : 'expense';
     if (!name || seen.has(type + '|' + name.toLowerCase())) continue;
     seen.add(type + '|' + name.toLowerCase());
-    out.push({ name, emoji: [...String((c && c.emoji) || '').trim()].slice(0, 4).join('') || '📦', type });
+    const cat = { name, emoji: [...String((c && c.emoji) || '').trim()].slice(0, 4).join('') || '📦', type };
+    if ((c.kind === 'lent' || c.kind === 'owed') && !out.some((x) => x.type === type && x.kind === c.kind)) cat.kind = c.kind;
+    out.push(cat);
   }
   for (const type of ['expense', 'income']) {
-    if (!out.some((c) => c.type === type)) out.push(...DEFAULT_CATEGORIES.filter((c) => c.type === type));
+    if (!out.some((c) => c.type === type && !c.kind)) out.push(...DEFAULT_CATEGORIES.filter((c) => c.type === type && !c.kind));
+  }
+  // Listas guardadas antes de existir Fiado y Deudas: se añaden (o se marca la que ya se llamara así).
+  for (const d of DEBT_CATEGORIES) {
+    if (out.some((c) => c.type === d.type && c.kind === d.kind)) continue;
+    const same = out.find((c) => c.type === d.type && !c.kind && c.name.toLowerCase() === d.name.toLowerCase());
+    if (same) same.kind = d.kind; else out.push({ ...d });
   }
   return out;
 }
@@ -78,6 +96,11 @@ export function setCategories(list) {
 export const getCategories = () => categories;
 export const categoriesFor = (type) => categories.filter((c) => c.type === (type === 'income' ? 'income' : 'expense'));
 export const emojiFor = (category) => (categories.find((c) => c.name === category) || { emoji: '📦' }).emoji;
+const typeOf = (e) => (e.type === 'income' ? 'income' : 'expense');
+/** 'lent' (fiado), 'owed' (deuda) o null según la categoría del movimiento. */
+export const debtKind = (e) => (categories.find((c) => c.name === e.category && c.type === typeOf(e)) || {}).kind || null;
+/** Nombre actual de la categoría de fiado o de deudas para un tipo de movimiento. */
+export const debtCategory = (kind, type) => (categories.find((c) => c.kind === kind && c.type === type) || {}).name;
 
 /** Limpia la lista de botones rápidos: { id, amount, category, method, note, type, scope }. */
 export function normalizeFavorites(raw) {
@@ -236,6 +259,101 @@ export function niceMax(cents) {
   return (lead <= 1 ? 1 : lead <= 2 ? 2 : lead <= 5 ? 5 : 10) * pow;
 }
 
+// ---------- Fiado y deudas ----------
+/**
+ * Saldo con cada persona a partir de los movimientos de Fiado y Deudas.
+ * Dinero que sale hacia alguien (le prestas o le pagas) suma; dinero que entra (te devuelve o te presta) resta.
+ * Saldo > 0: te debe. Saldo < 0: le debes. Devuelve { people: [{ person, balance, count }], theyOwe, iOwe }.
+ */
+export function debtBalances(expenses) {
+  const map = new Map();
+  for (const e of expenses) {
+    if (!debtKind(e)) continue;
+    const person = String(e.person || '').trim() || 'Sin nombre';
+    const key = fold(person);
+    if (!map.has(key)) map.set(key, { person, balance: 0, count: 0 });
+    const row = map.get(key);
+    row.balance += e.type === 'income' ? -e.amount : e.amount;
+    row.count++;
+  }
+  const people = [...map.values()].filter((p) => p.balance !== 0)
+    .sort((a, b) => Math.abs(b.balance) - Math.abs(a.balance) || a.person.localeCompare(b.person, 'es'));
+  return {
+    people,
+    theyOwe: people.reduce((s, p) => s + Math.max(p.balance, 0), 0),
+    iOwe: people.reduce((s, p) => s + Math.max(-p.balance, 0), 0),
+  };
+}
+/** Nombres de persona ya usados en Fiado y Deudas (para sugerirlos al escribir). */
+export const debtPeople = (expenses) => [...new Map(expenses.filter((e) => e.person).map((e) => [fold(e.person), e.person])).values()]
+  .sort((a, b) => a.localeCompare(b, 'es'));
+
+// ---------- Movimientos automáticos (Atajos de iPhone, Apple Pay) y reglas de comercio ----------
+// Un movimiento automático llega con auto = 'pending'. La app le pone categoría con las reglas y lo deja en
+// 'rule' (una regla ha acertado) o 'review' (ninguna regla: queda en «Otros» para que lo revises).
+const DEFAULT_RULES = [
+  ['mercadona', 'Supermercado'], ['carrefour', 'Supermercado'], ['lidl', 'Supermercado'], ['aldi', 'Supermercado'],
+  ['alcampo', 'Supermercado'], ['consum', 'Supermercado'], ['eroski', 'Supermercado'], ['supermercado', 'Supermercado'],
+  ['repsol', 'Transporte'], ['cepsa', 'Transporte'], ['moeve', 'Transporte'], ['shell', 'Transporte'], ['gasolinera', 'Transporte'],
+  ['uber', 'Transporte'], ['cabify', 'Transporte'], ['bolt', 'Transporte'], ['renfe', 'Transporte'], ['parking', 'Transporte'], ['taxi', 'Transporte'],
+  ['netflix', 'Suscripciones'], ['spotify', 'Suscripciones'], ['hbo', 'Suscripciones'], ['disney', 'Suscripciones'], ['apple.com', 'Suscripciones'],
+  ['farmacia', 'Salud'], ['dentista', 'Salud'], ['clinica', 'Salud'],
+  ['zara', 'Ropa'], ['pull&bear', 'Ropa'], ['bershka', 'Ropa'], ['primark', 'Ropa'], ['h&m', 'Ropa'],
+  ['mcdonald', 'Comida'], ['burger', 'Comida'], ['kfc', 'Comida'], ['glovo', 'Comida'], ['just eat', 'Comida'], ['restaurante', 'Comida'],
+  ['cafe', 'Comida'], ['bar ', 'Comida'], ['pizz', 'Comida'], ['kebab', 'Comida'],
+  ['cine', 'Ocio'], ['ikea', 'Casa'], ['leroy', 'Casa'],
+].map(([match, category]) => ({ match, category }));
+
+/** Limpia la lista de reglas { match, category }: «si el comercio contiene match, va a category». */
+export function normalizeRules(raw) {
+  const out = [];
+  const seen = new Set();
+  for (const r of Array.isArray(raw) ? raw : []) {
+    const match = fold((r && r.match) || '').trim().replace(/\s+/g, ' ').slice(0, 40);
+    const category = String((r && r.category) || '').trim();
+    if (match.length < 2 || !category || seen.has(match)) continue;
+    seen.add(match);
+    out.push({ match, category });
+  }
+  return out;
+}
+
+/** Categoría de gasto para un comercio: primero tus reglas (la más larga que encaje), luego las de fábrica. '' si ninguna. */
+export function categorize(text, rules = []) {
+  const hay = fold(text) + ' ';
+  const valid = new Set(categoriesFor('expense').filter((c) => !c.kind).map((c) => c.name));
+  const pick = (list) => [...list].filter((r) => valid.has(r.category) && hay.includes(r.match)).sort((a, b) => b.match.length - a.match.length)[0];
+  const hit = hay.trim() ? pick(rules) || pick(DEFAULT_RULES) : null;
+  return hit ? hit.category : '';
+}
+
+/** Si el movimiento está pendiente de categorizar, devuelve la versión ya categorizada; si no, null. */
+export function applyAuto(expense, rules = [], now = new Date().toISOString()) {
+  if (expense.auto !== 'pending' || expense.deleted) return null;
+  const given = categoriesFor(expense.type).some((c) => c.name === expense.category) && !['Otros', 'Otros ingresos'].includes(expense.category);
+  const category = given || expense.type === 'income' ? '' : categorize(expense.merchant || expense.note, rules);
+  // La fecha de cambio tiene que ser posterior a la de la fila que llegó (aunque el reloj del servidor vaya adelantado),
+  // o la versión sin categorizar volvería a ganar al sincronizar.
+  const updatedAt = new Date(Math.max(Date.parse(now) || 0, (Date.parse(expense.updatedAt) || 0) + 1)).toISOString();
+  return { ...expense, category: category || expense.category, auto: given || category ? 'rule' : 'review', updatedAt };
+}
+
+/**
+ * Alta rápida por dirección web: ?importe=12,50&comercio=Mercadona (opcionales: categoria, metodo, nota, tipo=ingreso).
+ * Devuelve los datos del movimiento (pendiente de categorizar) o null si la dirección no trae importe.
+ */
+export function quickFromParams(params, today = todayISO()) {
+  const get = (...names) => { for (const n of names) { const v = params.get(n); if (v && v.trim()) return v.trim(); } return ''; };
+  const amount = get('importe', 'amount');
+  if (!amount) return null;
+  const merchant = get('comercio', 'merchant').slice(0, 60);
+  return {
+    amount, date: today, type: /^(ingreso|income)$/i.test(get('tipo', 'type')) ? 'income' : 'expense',
+    category: get('categoria', 'category'), method: get('metodo', 'method'), note: get('nota', 'note') || merchant,
+    merchant: merchant || undefined, auto: 'pending',
+  };
+}
+
 // ---------- Objetivos de ahorro ----------
 /** Limpia la lista de objetivos { id, name, emoji, target, saved, deadline? } (importes en céntimos). */
 export function normalizeGoals(raw) {
@@ -389,15 +507,20 @@ export function normalizeExpense(raw) {
   };
   if (raw.recurringId) expense.recurringId = String(raw.recurringId);
   if (raw.group) expense.group = String(raw.group);
+  const person = String(raw.person || '').trim().slice(0, 40);
+  if (person) expense.person = person;
+  const merchant = String(raw.merchant || '').trim().slice(0, 60);
+  if (merchant) expense.merchant = merchant;
+  if (['pending', 'rule', 'review'].includes(raw.auto)) expense.auto = raw.auto;
   return expense;
 }
 
 // ---------- CSV (separador ";" y coma decimal: abre bien en Excel en español) ----------
-const CSV_HEAD = ['id', 'fecha', 'tipo', 'ambito', 'importe', 'categoria', 'metodo', 'nota'];
+const CSV_HEAD = ['id', 'fecha', 'tipo', 'ambito', 'importe', 'categoria', 'metodo', 'nota', 'persona'];
 const csvCell = (v) => (/[";\n\r,]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);
 
 export function toCSV(expenses) {
-  const rows = expenses.map((e) => [e.id, e.date, e.type === 'income' ? 'ingreso' : 'gasto', scopeOf(e) === 'business' ? 'agencia' : 'personal', centsToInput(e.amount), e.category, e.method, e.note].map((v) => csvCell(String(v))).join(';'));
+  const rows = expenses.map((e) => [e.id, e.date, e.type === 'income' ? 'ingreso' : 'gasto', scopeOf(e) === 'business' ? 'agencia' : 'personal', centsToInput(e.amount), e.category, e.method, e.note, e.person || ''].map((v) => csvCell(String(v))).join(';'));
   return '﻿' + [CSV_HEAD.join(';'), ...rows].join('\r\n') + '\r\n';
 }
 
@@ -436,7 +559,7 @@ export function fromCSV(text) {
   const idx = {
     id: col('id'), date: col('fecha', 'date'), amount: col('importe', 'amount', 'cantidad'),
     category: col('categoria', 'category'), method: col('metodo', 'method'), note: col('nota', 'note', 'concepto'),
-    type: col('tipo', 'type'), scope: col('ambito', 'scope'),
+    type: col('tipo', 'type'), scope: col('ambito', 'scope'), person: col('persona', 'person'),
   };
   if (idx.date < 0 || idx.amount < 0) return { expenses: [], errors: ['Faltan las columnas "fecha" e "importe"'] };
   const expenses = [], errors = [];
@@ -445,7 +568,7 @@ export function fromCSV(text) {
     try {
       const type = /^(ingreso|income)$/i.test(get('type')) ? 'income' : 'expense';
       const scope = /^(agencia|business|negocio)$/i.test(get('scope')) ? 'business' : 'personal';
-      expenses.push(normalizeExpense({ id: get('id'), date: get('date'), amount: get('amount'), category: get('category'), method: get('method'), note: get('note'), type, scope }));
+      expenses.push(normalizeExpense({ id: get('id'), date: get('date'), amount: get('amount'), category: get('category'), method: get('method'), note: get('note'), person: get('person'), type, scope }));
     } catch (err) { errors.push(`Fila ${i + 2}: ${err.message}`); }
   });
   return { expenses, errors };
@@ -457,7 +580,7 @@ export const toJSON = (expenses, budgets = {}, recurring = [], extra = {}) =>
     app: 'gastos', version: 3, exportedAt: new Date().toISOString(),
     expenses: expenses.map(clean), budgets, recurring: recurring.map(clean),
     favorites: extra.favorites || [], categories: extra.categories || null, groups: extra.groups || [],
-    goals: extra.goals || [],
+    goals: extra.goals || [], rules: extra.rules || [],
   }, null, 2);
 
 export function fromJSON(text) {
@@ -479,13 +602,14 @@ export function fromJSON(text) {
     categories: Array.isArray(data.categories) && data.categories.length ? normalizeCategories(data.categories) : null,
     groups: normalizeGroups(data.groups),
     goals: normalizeGoals(data.goals),
+    rules: normalizeRules(data.rules),
   };
 }
 
 // ---------- Sincronización ----------
 // Cada cosa sincronizable viaja como una fila { id, data, updatedAt, deleted }.
 // Ids: el del movimiento tal cual, "rec:<id>" para recurrentes y "meta:<clave>" para presupuestos,
-// botones rápidos (favorites), categorías, grupos y objetivos de ahorro (goals).
+// botones rápidos (favorites), categorías, grupos, objetivos de ahorro (goals) y reglas de comercio (rules).
 // Regla de conflicto: gana la versión con "updatedAt" más reciente.
 
 /** Quita los campos internos que no deben salir del dispositivo. */
@@ -512,7 +636,7 @@ export const remoteWins = (row, local) => !local || String(row.updatedAt) > Stri
 export function fromRow(row) {
   if (!row || typeof row.id !== 'string' || typeof row.updatedAt !== 'string') return null;
   const metaKey = row.id.startsWith('meta:') ? row.id.slice(5) : '';
-  const kind = metaKey === 'budgets' ? 'budgets' : ['favorites', 'categories', 'groups', 'goals'].includes(metaKey) ? 'meta'
+  const kind = metaKey === 'budgets' ? 'budgets' : ['favorites', 'categories', 'groups', 'goals', 'rules'].includes(metaKey) ? 'meta'
     : metaKey ? null : row.id.startsWith('rec:') ? 'recurring' : 'expense';
   if (!kind) return null;
   if (kind === 'meta') {
@@ -520,7 +644,7 @@ export function fromRow(row) {
     try {
       const data = JSON.parse(row.data);
       const value = metaKey === 'favorites' ? normalizeFavorites(data.value) : metaKey === 'groups' ? normalizeGroups(data.value)
-        : metaKey === 'goals' ? normalizeGoals(data.value) : normalizeCategories(data.value);
+        : metaKey === 'goals' ? normalizeGoals(data.value) : metaKey === 'rules' ? normalizeRules(data.value) : normalizeCategories(data.value);
       return { kind, record: { key: metaKey, value, updatedAt: row.updatedAt, dirty: false } };
     } catch { return null; }
   }

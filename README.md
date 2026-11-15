@@ -18,7 +18,7 @@ Abre la dirección que te indique. Para instalarla en el móvil hay que publicar
 - `sync.js`: sincronización opcional con un webhook de n8n (pull y push, gana el cambio más reciente).
 - `sw.js`: funcionamiento sin conexión. Sube `CACHE` de versión si cambias la lista de archivos.
 - `lock.js`: bloqueo con PIN (solo guarda un hash PBKDF2 con sal).
-- `tests/`: pruebas (`node --test tests/lib.test.mjs` y, con Playwright, `node tests/e2e.cjs`, `hito3`, `hito4`, `hito5`, `hito6`, `hito7`, `grupos`, `sync` y `sync-oculta` `.e2e.cjs`).
+- `tests/`: pruebas (`node --test tests/lib.test.mjs` y, con Playwright, `node tests/e2e.cjs`, `hito3`, `hito4`, `hito5`, `hito6`, `hito7`, `hito8`, `grupos`, `sync` y `sync-oculta` `.e2e.cjs`).
 
 ## Recurrentes, objetivos y comparativa
 
@@ -26,6 +26,15 @@ Abre la dirección que te indique. Para instalarla en el móvil hay que publicar
 - **Avisos de presupuesto**: al 80 % (🟡) y al 100 % (🔴) en la tarjeta del mes y al apuntar; también salen en el resumen semanal por email.
 - **Objetivos de ahorro**: nombre, meta, lo ahorrado y fecha límite opcional (calcula cuánto apartar al mes). Se sincronizan como `meta:goals` y van en la copia JSON. No son movimientos, así que no salen en el CSV.
 - **Comparativa**: gasto por categoría del mes que estás viendo frente al anterior. En el mes en curso compara por defecto los mismos días (del 1 a hoy en los dos meses); se puede cambiar a mes completo.
+
+## Borrar varios, fiado y deudas, gastos automáticos (versión 1.3)
+
+- **Borrar varios**: en Movimientos, «Seleccionar» → toca los que quieras (o «Todos») → «Borrar (n)». Respeta la búsqueda y los filtros, y el borrado se sincroniza.
+- **Fiado y deudas**: dos categorías fijas (se pueden renombrar, no quitar) que existen como gasto y como ingreso. Fiado + gasto = prestas; Fiado + ingreso = te lo devuelven; Deudas + ingreso = te prestan; Deudas + gasto = pagas. Piden el nombre de la persona (campo `person`, columna `persona` en el CSV). La tarjeta «Fiado y deudas» calcula el saldo con cada persona (lo que sale hacia ella menos lo que entra) y «Saldar» apunta el movimiento contrario. Cuentan en los totales del mes como cualquier movimiento.
+- **Gastos automáticos**: un movimiento con `auto: "pending"` (y `merchant` con el comercio) recibe categoría en la app con las reglas de comercio: queda en `rule` si alguna acierta o en `review` («⚠️ revisar categoría», en «Otros») si no. Llegan por dos vías:
+  - Dirección web: `…/Gastos/?importe=12,50&comercio=Mercadona` (opcionales `categoria`, `metodo`, `nota`, `tipo=ingreso`). Ojo: en iPhone, una app instalada en la pantalla de inicio guarda sus datos aparte de Safari, así que un atajo que abre esta dirección apunta en Safari, no en la app instalada.
+  - Sincronización: cualquier fila de `gastos_sync` cuyo `data` sea `{ "amount": "12,50 €", "date": "AAAA-MM-DD", "note": "Mercadona", "merchant": "Mercadona", "auto": "pending" }`. Es lo que puede escribir n8n desde un Atajo de iPhone (Siri o la automatización de Apple Pay).
+- **Reglas de comercio** (Ajustes): «si el comercio contiene este texto, va a esta categoría». Se aprenden solas al corregir la categoría de un gasto automático, se sincronizan como `meta:rules` y van en la copia JSON. Hay unas de fábrica (Mercadona, Repsol, Netflix…) en `lib.js`; las tuyas ganan.
 
 ## Sincronización entre dispositivos (opcional)
 

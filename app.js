@@ -5,6 +5,7 @@ import {
   METHODS, categoriesFor, emojiFor, formatCents, centsToInput, parseAmount, todayISO, shiftMonth, monthLabel, dayLabel,
   summarize, budgetRows, normalizeExpense, normalizeRecurring, dueRecurring, toCSV, fromCSV, toJSON, fromJSON,
   EVERY, everyLabel, nextRecurringDate, recurringFromNextDate, normalizeGoals, goalProgress, compareMonths,
+  debtKind, debtCategory, debtBalances, debtPeople, normalizeRules, applyAuto, quickFromParams,
   setCategories, getCategories, normalizeCategories, normalizeFavorites, normalizeGroups, scopeOf, scopeLabel, inScope, tagsOf, filterExpenses, sortNewestFirst, monthlySeries, niceMax, shortMonth,
 } from './lib.js';
 
@@ -22,6 +23,7 @@ const state = {
   meta: {
     favorites: { value: [], updatedAt: '', dirty: false }, categories: { value: null, updatedAt: '', dirty: false },
     groups: { value: [], updatedAt: '', dirty: false }, goals: { value: [], updatedAt: '', dirty: false },
+    rules: { value: [], updatedAt: '', dirty: false },
   },
   month: todayISO().slice(0, 7), editingId: null,
   view: '', // '' = todo, 'personal', 'business' (agencia) o 'g:<id>' (un grupo)
@@ -72,7 +74,9 @@ async function saveMeta(key, value, updatedAt = nowISO(), dirty = true) {
   if (key === 'categories') setCategories(value);
   if (key === 'groups') renderGroups();
 }
-const tombstone = (id) => ({ id, deleted: true, updatedAt: nowISO() });
+/** Fecha de cambio para modificar un registro: ahora, pero siempre posterior a la que ya tenía (por si otro reloj va adelantado). */
+const stampAfter = (record) => new Date(Math.max(Date.now(), (Date.parse(record && record.updatedAt) || 0) + 1)).toISOString();
+const tombstone = (id, previous) => ({ id, deleted: true, updatedAt: stampAfter(previous) });
 
 const addForm = $('#add-form');
 const editForm = $('#edit-form');
@@ -96,6 +100,26 @@ function renderAddCategories() {
   const radios = [...addForm.querySelectorAll('[name=category]')];
   (radios.find((r) => r.value === last) || radios[0]).checked = true;
   $('#add-submit').textContent = type === 'income' ? 'Guardar ingreso' : 'Guardar gasto';
+  syncAddPerson();
+}
+
+// ---------- Fiado y deudas: campo «persona» ----------
+const PERSON_HINT = {
+  'lent|expense': '¿A quién se lo prestas?', 'lent|income': '¿Quién te lo devuelve?',
+  'owed|income': '¿Quién te lo presta?', 'owed|expense': '¿A quién le pagas?',
+};
+/** Enseña el campo de persona solo si la categoría elegida es Fiado o Deudas. */
+function syncAddPerson() {
+  const checked = addForm.querySelector('[name=category]:checked');
+  const type = addForm.type.value;
+  const kind = checked ? debtKind({ category: checked.value, type }) : null;
+  addForm.person.hidden = !kind;
+  if (kind) { addForm.person.placeholder = PERSON_HINT[`${kind}|${type}`]; addForm.person.setAttribute('aria-label', PERSON_HINT[`${kind}|${type}`]); }
+  else addForm.person.value = '';
+}
+function syncEditPerson() {
+  const kind = debtKind({ category: editForm.category.value, type: editForm.type.value });
+  $('#edit-person').hidden = !kind;
 }
 
 function setupForms() {
@@ -107,6 +131,7 @@ function setupForms() {
 function resetAddForm() {
   addForm.amount.value = '';
   addForm.note.value = '';
+  addForm.person.value = '';
   addForm.repeat.checked = false;
   addForm.favorite.checked = false;
   addForm.type.value = 'expense'; // lo habitual es apuntar gastos
@@ -118,6 +143,7 @@ function resetAddForm() {
 
 addForm.addEventListener('change', (ev) => {
   if (ev.target.name === 'type') renderAddCategories();
+  if (ev.target.name === 'category') syncAddPerson();
   // Elegir la categoría «Agencia» marca el movimiento como de la agencia.
   if (ev.target.name === 'category' && ev.target.value === 'Agencia' && !addForm.group.value) addForm.scope.value = 'business';
   // Un grupo vive dentro de Personal o de Agencia: el ámbito sigue al grupo.
@@ -235,10 +261,16 @@ addForm.addEventListener('submit', async (ev) => {
       ...groupFields(addForm.group.value, addForm.scope.value),
       category: addForm.querySelector('[name=category]:checked').value,
       date: addForm.date.value, method: addForm.method.value, note: addForm.note.value,
+      person: addForm.person.hidden ? '' : addForm.person.value,
     });
   } catch (err) {
     showMsg(msg, err.message, true);
     addForm.amount.focus();
+    return;
+  }
+  if (debtKind(expense) && !expense.person) {
+    showMsg(msg, 'Escribe el nombre de la persona para llevar la cuenta.', true);
+    addForm.person.focus();
     return;
   }
   const repeat = addForm.repeat.checked;
@@ -256,14 +288,14 @@ addForm.addEventListener('submit', async (ev) => {
     await saveMeta('favorites', normalizeFavorites([...state.meta.favorites.value, { amount, category, method, note: note.replace(/\s+$/, ''), type, scope }]));
     renderFavorites();
   }
-  prefs.set('category.' + expense.type, expense.category);
+  if (!debtKind(expense)) prefs.set('category.' + expense.type, expense.category); // Fiado y Deudas no se quedan como categoría habitual
   prefs.set('method', expense.method);
   state.month = expense.date.slice(0, 7);
   if (repeat) await generateDue(); // por si la fecha es de un mes pasado
   resetAddForm();
   render();
   const warning = expense.type === 'expense' ? budgetWarning(expense.category, state.month) : '';
-  showMsg(msg, warning || `Guardado: ${formatCents(expense.amount)} en ${expense.category}${repeat ? ' (se repetirá cada mes)' : ''}`, warning.startsWith('🔴'));
+  showMsg(msg, warning || `Guardado: ${formatCents(expense.amount)} en ${expense.category}${expense.person ? ` (${expense.person})` : ''}${repeat ? ' (se repetirá cada mes)' : ''}`, warning.startsWith('🔴'));
   queueSync();
   addForm.amount.focus();
 });
@@ -385,7 +417,8 @@ $('#categories').addEventListener('click', async (ev) => {
   if (!row || ev.target.tagName !== 'BUTTON') return;
   const list = getCategories().map((c) => ({ ...c }));
   const cat = list[Number(row.dataset.index)];
-  if (list.filter((c) => c.type === cat.type).length <= 1) return showMsg($('#data-msg'), 'Tiene que quedar al menos una categoría de cada tipo.', true);
+  if (cat.kind) return showMsg($('#data-msg'), `«${cat.name}» lleva la cuenta de fiado y deudas: puedes cambiarle el nombre, pero no quitarla.`, true);
+  if (list.filter((c) => c.type === cat.type && !c.kind).length <= 1) return showMsg($('#data-msg'), 'Tiene que quedar al menos una categoría de cada tipo.', true);
   if (!confirm(`¿Quitar la categoría «${cat.name}»? Los movimientos que ya la usan no se borran.`)) return;
   list.splice(Number(row.dataset.index), 1);
   await saveCategories(list);
@@ -403,6 +436,52 @@ $('#category-add').addEventListener('submit', async (ev) => {
   await saveCategories([...getCategories(), { name, emoji: form.emoji.value, type }]);
   form.reset();
   showMsg($('#data-msg'), `Categoría «${name}» añadida.`);
+});
+
+// ---------- Reglas de comercio (para los gastos automáticos) ----------
+const ruleCategories = () => categoriesFor('expense').filter((c) => !c.kind).map((c) => c.name);
+function renderRules() {
+  fillSelect($('#rule-add').category, ruleCategories());
+  const rules = state.meta.rules.value;
+  const list = $('#rules');
+  if (!rules.length) {
+    list.replaceChildren(el('li', { className: 'empty', textContent: 'Aún no has enseñado ninguna. Ya reconozco comercios habituales (Mercadona, Repsol, Netflix…).' }));
+    return;
+  }
+  list.replaceChildren(...rules.map((r) => {
+    const select = el('select');
+    fillSelect(select, ruleCategories().includes(r.category) ? ruleCategories() : [...ruleCategories(), r.category]);
+    select.value = r.category;
+    select.dataset.match = r.match;
+    select.setAttribute('aria-label', `Categoría para ${r.match}`);
+    const remove = el('button', { type: 'button', className: 'danger', textContent: 'Quitar' });
+    remove.dataset.match = r.match;
+    return el('li', {}, el('span', { className: 'rule-text', textContent: r.match }), el('div', { className: 'rec-actions' }, select, remove));
+  }));
+}
+async function saveRules(list, text) {
+  await saveMeta('rules', normalizeRules(list));
+  const changed = await processPending();
+  renderRules();
+  if (changed) render();
+  if (text) showMsg($('#data-msg'), text);
+  queueSync();
+}
+$('#rules').addEventListener('change', (ev) => {
+  const match = ev.target.dataset.match;
+  if (match) saveRules(state.meta.rules.value.map((r) => (r.match === match ? { ...r, category: ev.target.value } : r)), `«${match}» irá a ${ev.target.value}.`);
+});
+$('#rules').addEventListener('click', (ev) => {
+  const match = ev.target.tagName === 'BUTTON' && ev.target.dataset.match;
+  if (match) saveRules(state.meta.rules.value.filter((r) => r.match !== match), `Regla «${match}» quitada.`);
+});
+$('#rule-add').addEventListener('submit', (ev) => {
+  ev.preventDefault();
+  const form = ev.target;
+  const rule = normalizeRules([{ match: form.match.value, category: form.category.value }])[0];
+  if (!rule) return showMsg($('#data-msg'), 'El texto del comercio tiene que tener al menos 2 letras.', true);
+  saveRules([rule, ...state.meta.rules.value.filter((r) => r.match !== rule.match)], `Regla guardada: «${rule.match}» irá a ${rule.category}.`);
+  form.match.value = '';
 });
 
 // ---------- Modo privado ----------
@@ -574,6 +653,7 @@ function fillEditCategories(type, current) {
   if (current && !cats.includes(current)) cats.push(current); // categorías importadas que no están en la lista
   fillSelect(editForm.category, cats);
   if (current) editForm.category.value = current;
+  syncEditPerson();
 }
 
 function openEdit(id) {
@@ -590,11 +670,15 @@ function openEdit(id) {
   editForm.date.value = e.date;
   editForm.method.value = e.method;
   editForm.note.value = e.note;
-  showMsg($('#edit-msg'), e.recurringId ? 'Movimiento recurrente: los cambios solo afectan a este mes.' : '');
+  editForm.person.value = e.person || '';
+  showMsg($('#edit-msg'), e.recurringId ? 'Movimiento recurrente: los cambios solo afectan a este mes.'
+    : e.auto === 'review' ? `Apuntado solo${e.merchant ? ` desde «${e.merchant}»` : ''}. Elige la categoría y la recordaré para la próxima.`
+    : e.auto === 'rule' ? `Apuntado solo${e.merchant ? ` desde «${e.merchant}»` : ''}. Si cambias la categoría, la recordaré.` : '');
   editDialog.showModal();
 }
 
 editForm.type.addEventListener('change', () => fillEditCategories(editForm.type.value));
+editForm.category.addEventListener('change', syncEditPerson);
 editForm.group.addEventListener('change', () => { const g = groupById(editForm.group.value); if (g) editForm.scope.value = g.scope; });
 editForm.scope.addEventListener('change', () => { const g = groupById(editForm.group.value); if (g && g.scope !== editForm.scope.value) editForm.group.value = ''; });
 
@@ -607,21 +691,36 @@ editForm.addEventListener('submit', async (ev) => {
     updated = normalizeExpense({
       ...original, type: editForm.type.value, ...groupFields(editForm.group.value, editForm.scope.value), amount: editForm.amount.value, category: editForm.category.value,
       date: editForm.date.value, method: editForm.method.value, note: editForm.note.value,
-      updatedAt: new Date().toISOString(),
+      person: $('#edit-person').hidden ? '' : editForm.person.value,
+      auto: undefined, // revisado a mano: deja de estar marcado como automático
+      updatedAt: stampAfter(original),
     });
   } catch (err) {
     return showMsg($('#edit-msg'), err.message, true);
   }
+  if (debtKind(updated) && !updated.person) return showMsg($('#edit-msg'), 'Escribe el nombre de la persona para llevar la cuenta.', true);
   await saveExpense(updated);
+  // Corregir la categoría de un gasto automático enseña la regla para ese comercio.
+  let learned = '';
+  if (original.merchant && original.auto && updated.type === 'expense' && updated.category !== original.category && !debtKind(updated)) {
+    const rule = normalizeRules([{ match: original.merchant, category: updated.category }])[0];
+    if (rule) {
+      await saveMeta('rules', normalizeRules([rule, ...state.meta.rules.value.filter((r) => r.match !== rule.match)]));
+      learned = `Aprendido: «${original.merchant}» irá a ${updated.category}.`;
+      const more = await processPending(original.merchant);
+      if (more) learned += ` ${more === 1 ? 'Otro movimiento igual también se ha cambiado' : `Otros ${more} movimientos iguales también se han cambiado`}.`;
+    }
+  }
   editDialog.close();
   render();
+  if (learned) showMsg($('#list-msg'), learned);
   queueSync();
 });
 
 $('#edit-delete').addEventListener('click', async () => {
   const e = state.expenses.find((x) => x.id === state.editingId);
   if (!e || !confirm(`¿Borrar este movimiento de ${formatCents(e.amount)}?`)) return;
-  await saveExpense(tombstone(e.id)); // se guarda la marca de borrado para que el borrado también se sincronice
+  await saveExpense(tombstone(e.id, e)); // se guarda la marca de borrado para que el borrado también se sincronice
   editDialog.close();
   render();
   queueSync();
@@ -663,8 +762,78 @@ function render() {
 
   renderCompare();
   renderGoals();
+  renderDebts();
   renderChart();
   renderList(items);
+}
+
+// ---------- Fiado y deudas: quién debe qué ----------
+function renderDebts() {
+  const { people, theyOwe, iOwe } = debtBalances(state.expenses);
+  $('#people').replaceChildren(...debtPeople(state.expenses).map((p) => el('option', { value: p })));
+  $('#debts-total').textContent = people.length ? `Te deben ${formatCents(theyOwe)} · Debes ${formatCents(iOwe)}` : '';
+  const list = $('#debts');
+  if (!people.length) {
+    list.replaceChildren(el('li', { className: 'empty', textContent: 'Nada pendiente. Apunta un gasto en «Fiado» cuando prestes dinero, o un ingreso en «Deudas» cuando te lo presten, y aquí verás quién debe qué.' }));
+    return;
+  }
+  list.replaceChildren(...people.map((p) => {
+    const mine = p.balance > 0;
+    const btn = el('button', { type: 'button', textContent: 'Saldar' });
+    btn.dataset.person = p.person;
+    btn.setAttribute('aria-label', mine ? `Apuntar que ${p.person} te ha devuelto ${formatCents(p.balance)}` : `Apuntar que has pagado ${formatCents(-p.balance)} a ${p.person}`);
+    return el('li', {},
+      el('span', { className: 'who', textContent: mine ? `${p.person} te debe` : `Le debes a ${p.person}` }),
+      el('span', { className: 'amt ' + (mine ? 'pos' : 'neg'), textContent: formatCents(Math.abs(p.balance)) }), btn);
+  }));
+}
+
+$('#debts').addEventListener('click', async (ev) => {
+  const btn = ev.target.closest('button');
+  const p = btn && debtBalances(state.expenses).people.find((x) => x.person === btn.dataset.person);
+  if (!p) return;
+  const mine = p.balance > 0;
+  const amount = Math.abs(p.balance);
+  if (!confirm(mine ? `¿Apuntar hoy que ${p.person} te ha devuelto ${formatCents(amount)}?` : `¿Apuntar hoy que has pagado ${formatCents(amount)} a ${p.person}?`)) return;
+  const type = mine ? 'income' : 'expense';
+  await saveExpense(normalizeExpense({
+    type, amount, category: debtCategory(mine ? 'lent' : 'owed', type), person: p.person === 'Sin nombre' ? '' : p.person,
+    date: todayISO(), method: prefs.get('method', METHODS[0]), note: mine ? 'Devolución' : 'Pago de deuda',
+  }));
+  state.month = todayISO().slice(0, 7);
+  render();
+  showMsg($('#list-msg'), mine ? `Saldado: ${p.person} ya no te debe nada.` : `Saldado: ya no le debes nada a ${p.person}.`);
+  queueSync();
+});
+
+// ---------- Movimientos automáticos: categorizar los pendientes ----------
+/** Pone categoría a los movimientos que llegan de un atajo o de Apple Pay. Con comercio, repasa también los «por revisar» de ese comercio. */
+async function processPending(merchant = '') {
+  const changed = [];
+  for (const e of state.expenses) {
+    const retry = merchant && e.auto === 'review' && e.merchant === merchant;
+    const done = applyAuto(retry ? { ...e, auto: 'pending' } : e, state.meta.rules.value, nowISO());
+    if (done && (!retry || done.auto === 'rule')) changed.push({ ...done, dirty: true });
+  }
+  if (!changed.length) return 0;
+  await db.putMany(changed);
+  changed.forEach((e) => setLocal(state.all, e));
+  refresh();
+  return changed.length;
+}
+
+/** Alta rápida por dirección web (atajo que abre la app con ?importe=…&comercio=…). */
+async function quickAddFromURL() {
+  const raw = quickFromParams(new URLSearchParams(location.search));
+  if (!raw) return;
+  history.replaceState(null, '', location.pathname); // así recargar la página no lo apunta dos veces
+  let expense;
+  try { expense = normalizeExpense(raw); } catch (err) { return showMsg($('#add-msg'), `Alta rápida: ${err.message.toLowerCase()}.`, true); }
+  await saveExpense(expense);
+  await processPending();
+  const saved = state.expenses.find((e) => e.id === expense.id);
+  state.month = saved.date.slice(0, 7);
+  showMsg($('#add-msg'), `Apuntado: ${formatCents(saved.amount)} en ${saved.category}${saved.note ? ` (${saved.note})` : ''}.${saved.auto === 'review' ? ' No reconozco el comercio: toca el movimiento para elegir categoría.' : ''}`);
 }
 
 // ---------- Comparativa con el mes anterior ----------
@@ -910,6 +1079,9 @@ $('#chart-category').addEventListener('change', renderChart);
 // ---------- Lista con búsqueda y filtros ----------
 const filters = { query: '', category: '', method: '', tag: '', all: false };
 const filtersActive = () => Boolean(filters.query || filters.category || filters.method || filters.tag || filters.all);
+// Modo selección: tocar un movimiento lo marca en vez de abrirlo; «Borrar» quita todos los marcados.
+const selection = { on: false, ids: new Set(), shown: [] };
+const refreshList = () => renderList(summarize(visible(), state.month).items);
 
 /** Rellena un desplegable de filtro conservando lo elegido (aunque ya no haya movimientos con ese valor). */
 function fillFilter(select, values, emptyLabel, current) {
@@ -936,6 +1108,19 @@ function renderList(monthItems) {
     summary.replaceChildren(el('span', { textContent: `${count} · ${formatCents(spent)} en gastos${earned ? ` · ${formatCents(earned)} en ingresos` : ''}` }), clear);
   } else summary.replaceChildren();
 
+  // Solo se puede tener marcado lo que se está viendo.
+  selection.shown = items.map((e) => e.id);
+  selection.ids = new Set(selection.shown.filter((id) => selection.ids.has(id)));
+  const picked = items.filter((e) => selection.ids.has(e.id));
+  $('#select-toggle').hidden = !items.length && !selection.on;
+  $('#select-toggle').textContent = selection.on ? 'Cancelar' : 'Seleccionar';
+  $('#select-toggle').setAttribute('aria-pressed', String(selection.on));
+  $('#select-bar').hidden = !selection.on;
+  $('#select-count').textContent = picked.length ? `${picked.length} ${picked.length === 1 ? 'seleccionado' : 'seleccionados'} · ${formatCents(picked.reduce((s, e) => s + e.amount, 0))}` : 'Toca los movimientos que quieras borrar';
+  $('#select-all').textContent = items.length && picked.length === items.length ? 'Ninguno' : 'Todos';
+  $('#select-delete').disabled = !picked.length;
+  $('#select-delete').textContent = picked.length ? `Borrar (${picked.length})` : 'Borrar';
+
   const list = $('#list');
   if (!items.length) {
     list.replaceChildren(el('p', { className: 'empty', textContent: filtersActive() ? 'Ningún movimiento coincide con la búsqueda.' : 'No hay movimientos este mes.' }));
@@ -954,17 +1139,29 @@ function renderList(monthItems) {
     }
     const isIncome = e.type === 'income';
     const details = [
-      e.note ? e.category : null, e.method, e.recurringId ? 'recurrente' : null,
+      e.note || e.person ? e.category : null, e.note && e.person ? e.person : null, e.method, e.recurringId ? 'recurrente' : null,
+      e.auto === 'rule' ? 'automático' : null,
       scopeOf(e) === 'business' && state.view !== 'business' && !(viewGroup() && e.group === viewGroup().id) ? 'agencia' : null,
       e.group && groupById(e.group) && state.view !== 'g:' + e.group ? `${groupById(e.group).emoji} ${groupById(e.group).name}` : null,
     ].filter(Boolean).join(' · ');
     const amountText = (isIncome ? '+' : '') + formatCents(e.amount);
+    const title = e.note || (e.person ? `${e.category} · ${e.person}` : e.category);
+    const small = el('small', { textContent: details });
+    if (e.auto === 'review' || e.auto === 'pending') small.prepend(el('span', { className: 'flag', textContent: '⚠️ revisar categoría · ' }));
     const row = el('button', { className: 'item', type: 'button' },
       el('span', { className: 'emoji', textContent: emojiFor(e.category) }),
-      el('span', { className: 'what' }, el('b', { textContent: e.note || e.category }), el('small', { textContent: details })),
+      el('span', { className: 'what' }, el('b', { textContent: title }), small),
       el('span', { className: 'amt' + (isIncome ? ' pos' : ''), textContent: amountText }));
     row.dataset.id = e.id;
-    row.setAttribute('aria-label', `Editar ${e.note || e.category}, ${amountText}`);
+    if (selection.on) {
+      const on = selection.ids.has(e.id);
+      row.classList.add('selecting');
+      row.classList.toggle('selected', on);
+      row.prepend(el('span', { className: 'tick', textContent: on ? '✓' : '' }));
+      row.setAttribute('role', 'checkbox');
+      row.setAttribute('aria-checked', String(on));
+      row.setAttribute('aria-label', `${title}, ${amountText}`);
+    } else row.setAttribute('aria-label', `Editar ${title}, ${amountText}`);
     nodes.push(row);
   }
   list.replaceChildren(...nodes);
@@ -999,7 +1196,38 @@ $('#filter-summary').addEventListener('click', (ev) => {
 
 $('#list').addEventListener('click', (ev) => {
   const row = ev.target.closest('.item');
-  if (row) openEdit(row.dataset.id);
+  if (!row) return;
+  if (!selection.on) return openEdit(row.dataset.id);
+  const id = row.dataset.id;
+  if (selection.ids.has(id)) selection.ids.delete(id); else selection.ids.add(id);
+  refreshList();
+});
+
+$('#select-toggle').addEventListener('click', () => {
+  selection.on = !selection.on;
+  selection.ids.clear();
+  showMsg($('#list-msg'), '');
+  refreshList();
+});
+$('#select-all').addEventListener('click', () => {
+  selection.ids = selection.ids.size === selection.shown.length ? new Set() : new Set(selection.shown);
+  refreshList();
+});
+$('#select-delete').addEventListener('click', async () => {
+  const picked = state.expenses.filter((e) => selection.ids.has(e.id));
+  if (!picked.length) return;
+  const total = formatCents(picked.reduce((s, e) => s + e.amount, 0));
+  if (!confirm(picked.length === 1 ? `¿Borrar este movimiento de ${total}?` : `¿Borrar ${picked.length} movimientos (${total} en total)? No se puede deshacer.`)) return;
+  // Marcas de borrado, como al borrar uno: así el borrado también llega a los otros dispositivos.
+  const gone = picked.map((e) => ({ ...tombstone(e.id, e), dirty: true }));
+  await db.putMany(gone);
+  gone.forEach((t) => setLocal(state.all, t));
+  refresh();
+  selection.on = false;
+  selection.ids.clear();
+  render();
+  showMsg($('#list-msg'), picked.length === 1 ? 'Borrado 1 movimiento.' : `Borrados ${picked.length} movimientos.`);
+  queueSync();
 });
 $('#prev-month').addEventListener('click', () => { state.month = shiftMonth(state.month, -1); render(); });
 $('#next-month').addEventListener('click', () => { state.month = shiftMonth(state.month, 1); render(); });
@@ -1019,6 +1247,7 @@ $('#btn-data').addEventListener('click', () => {
   renderRecurring();
   renderFavorites();
   renderCategories();
+  renderRules();
   renderSyncSection();
   const cfg = sync.getConfig();
   $('#sync-url').value = cfg.url;
@@ -1030,7 +1259,7 @@ $('#btn-data').addEventListener('click', () => {
   dataDialog.showModal();
 });
 $('#data-close').addEventListener('click', () => dataDialog.close());
-$('#export-json').addEventListener('click', () => download(`gastos-${todayISO()}.json`, toJSON(state.expenses, state.budgets, state.recurring, { favorites: state.meta.favorites.value, categories: state.meta.categories.value, groups: state.meta.groups.value, goals: state.meta.goals.value }), 'application/json'));
+$('#export-json').addEventListener('click', () => download(`gastos-${todayISO()}.json`, toJSON(state.expenses, state.budgets, state.recurring, { favorites: state.meta.favorites.value, categories: state.meta.categories.value, groups: state.meta.groups.value, goals: state.meta.goals.value, rules: state.meta.rules.value }), 'application/json'));
 $('#export-csv').addEventListener('click', () => download(`gastos-${state.view ? viewLabel().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '-') + '-' : ''}${todayISO()}.csv`, toCSV(visible()), 'text/csv;charset=utf-8'));
 $('#import-btn').addEventListener('click', () => $('#import-file').click());
 
@@ -1041,7 +1270,7 @@ $('#import-file').addEventListener('change', async (ev) => {
   const msg = $('#data-msg');
   const text = await file.text();
   const isJSON = file.name.toLowerCase().endsWith('.json') || /^\s*[\[{]/.test(text);
-  const { expenses, errors, budgets = {}, recurring = [], favorites = [], categories = null, groups = [], goals = [] } = isJSON ? fromJSON(text) : fromCSV(text);
+  const { expenses, errors, budgets = {}, recurring = [], favorites = [], categories = null, groups = [], goals = [], rules = [] } = isJSON ? fromJSON(text) : fromCSV(text);
   if (!expenses.length && !recurring.length && !Object.keys(budgets).length && !favorites.length && !categories && !groups.length && !goals.length) {
     return showMsg(msg, errors[0] || 'No se ha encontrado ningún movimiento en el archivo.', true);
   }
@@ -1075,6 +1304,9 @@ $('#import-file').addEventListener('change', async (ev) => {
     const mine = new Set(state.meta.goals.value.map((g) => g.id));
     await saveMeta('goals', [...state.meta.goals.value, ...goals.filter((g) => !mine.has(g.id))]);
   }
+  if (rules.length) await saveMeta('rules', normalizeRules([...state.meta.rules.value, ...rules]));
+  await processPending();
+  renderRules();
   renderFavorites();
   renderCategories();
   { const typed = addForm.amount.value; renderAddCategories(); addForm.amount.value = typed; }
@@ -1138,13 +1370,13 @@ async function runSync() {
   try {
     const result = await sync.syncNow(store);
     if (result && result.pulled) {
-      const created = await generateDue();
+      const created = (await generateDue()) + (await processPending()); // lo que llega de un atajo se categoriza aquí
       const typed = addForm.amount.value; // no pisar lo que se esté escribiendo
       renderAddCategories();
       addForm.amount.value = typed;
       renderFavorites();
       render();
-      if (dataDialog.open) { renderBudgets(); renderRecurring(); renderCategories(); }
+      if (dataDialog.open) { renderBudgets(); renderRecurring(); renderCategories(); renderRules(); }
       if (created) queueSync();
     }
     const time = new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
@@ -1288,7 +1520,8 @@ async function start() {
   setPrivate(prefs.get('private', 'off') === 'on');
   try {
     // Las categorías y los grupos van primero: el formulario de alta los necesita.
-    const [favorites, categories, groups, goals] = await Promise.all([db.getMeta('m:favorites', null), db.getMeta('m:categories', null), db.getMeta('m:groups', null), db.getMeta('m:goals', null)]);
+    const [favorites, categories, groups, goals, rules] = await Promise.all([db.getMeta('m:favorites', null), db.getMeta('m:categories', null), db.getMeta('m:groups', null), db.getMeta('m:goals', null), db.getMeta('m:rules', null)]);
+    if (rules) state.meta.rules = rules;
     if (goals) state.meta.goals = goals;
     if (favorites) state.meta.favorites = favorites;
     if (categories) { state.meta.categories = categories; setCategories(categories.value); }
@@ -1317,11 +1550,13 @@ async function start() {
     }
     refresh();
     created = await generateDue();
+    await processPending();
+    await quickAddFromURL();
   } catch (err) {
     showMsg($('#add-msg'), 'No se puede abrir el almacenamiento de este navegador. ¿Estás en modo privado?', true);
   }
   render();
-  if (created) showMsg($('#add-msg'), created === 1 ? 'Se ha apuntado 1 movimiento recurrente.' : `Se han apuntado ${created} movimientos recurrentes.`);
+  if (created && !$('#add-msg').textContent) showMsg($('#add-msg'), created === 1 ? 'Se ha apuntado 1 movimiento recurrente.' : `Se han apuntado ${created} movimientos recurrentes.`);
   if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
   runSync();

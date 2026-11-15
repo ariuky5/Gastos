@@ -37,6 +37,8 @@
         <span class="euro">€</span>
       </div>
       <div id="add-cats" class="chips" role="radiogroup" aria-label="Categoría"></div>
+      <input name="person" id="add-person" type="text" list="people" maxlength="40" placeholder="¿A quién?" aria-label="Persona" hidden>
+      <datalist id="people"></datalist>
       <div class="seg small" role="radiogroup" aria-label="Ámbito">
         <label><input type="radio" name="scope" value="personal" checked>Personal</label>
         <label><input type="radio" name="scope" value="business">Agencia</label>
@@ -112,8 +114,23 @@
       <ul id="goals" class="goals"></ul>
     </section>
 
+    <section class="card card-debts" aria-labelledby="debts-title">
+      <h2 id="debts-title">Fiado y deudas</h2>
+      <p id="debts-total" class="hint debts-total"></p>
+      <ul id="debts" class="debts"></ul>
+    </section>
+
     <section class="card card-list">
-      <h2 class="section-title">Movimientos</h2>
+      <div class="chart-head">
+        <h2>Movimientos</h2>
+        <button type="button" id="select-toggle" class="small-btn" aria-pressed="false">Seleccionar</button>
+      </div>
+      <div id="select-bar" class="select-bar" hidden>
+        <span id="select-count" role="status" aria-live="polite"></span>
+        <button type="button" id="select-all" class="small-btn">Todos</button>
+        <button type="button" id="select-delete" class="small-btn danger" disabled>Borrar</button>
+      </div>
+      <p id="list-msg" class="msg" role="status" aria-live="polite"></p>
       <input id="search" type="search" placeholder="Buscar: nota, categoría, #etiqueta…" aria-label="Buscar movimientos" autocomplete="off">
       <details id="filters" class="filters">
         <summary>Filtros</summary>
@@ -139,6 +156,7 @@
       <label>Ámbito<select name="scope"><option value="personal">Personal</option><option value="business">Agencia</option></select></label>
       <label>Importe (€)<input name="amount" inputmode="decimal" required></label>
       <label>Categoría<select name="category"></select></label>
+      <label id="edit-person" hidden>Persona<input name="person" type="text" list="people" maxlength="40"></label>
       <label id="edit-group">Grupo<select name="group"></select></label>
       <label>Fecha<input name="date" type="date" required></label>
       <label>Método de pago<select name="method"></select></label>
@@ -271,6 +289,17 @@
     </form>
     </details>
 
+    <details class="fold">
+    <summary>Reglas de comercio (Apple Pay y atajos)</summary>
+    <p class="hint">Si el comercio de un gasto automático contiene el texto, va a esa categoría. Cuando corriges la categoría de uno, la regla se aprende sola. Sin regla, cae en «Otros» marcado para revisar.</p>
+    <ul id="rules" class="recurring"></ul>
+    <form id="rule-add" class="cat-row rule-row" autocomplete="off">
+      <input name="match" aria-label="Texto del comercio" placeholder="Texto del comercio" maxlength="40" required>
+      <select name="category" aria-label="Categoría de la regla"></select>
+      <button type="submit">Añadir</button>
+    </form>
+    </details>
+
     <h3>Grupos</h3>
     <p class="hint">Un viaje, un proyecto o un cliente. Lo que apuntes en un grupo cuenta también en Personal o en Agencia. Quitar un grupo no borra sus movimientos.</p>
     <ul id="groups-list" class="recurring"></ul>
@@ -306,7 +335,7 @@
       <input id="import-file" type="file" accept=".json,.csv,application/json,text/csv" hidden>
     </div>
     <p id="data-msg" class="msg" role="status" aria-live="polite"></p>
-    <p id="app-version" class="app-version">Gastos · versión 1.2</p>
+    <p id="app-version" class="app-version">Gastos · versión 1.3</p>
     <div class="actions"><span class="spacer"></span><button id="data-close" class="ghost">Cerrar</button></div>
   </dialog>
 
