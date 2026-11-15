@@ -241,12 +241,12 @@ import { normalizeCategories, normalizeFavorites, setCategories, categoriesFor, 
 
 test('categorías: limpia, quita duplicados y garantiza una de cada tipo', () => {
   const list = normalizeCategories([{ name: ' Mascota ', emoji: '🐶' }, { name: 'mascota' }, { name: '' }, { name: 'Sin emoji' }]);
-  assert.deepEqual(list.filter((c) => c.type === 'expense'), [{ name: 'Mascota', emoji: '🐶', type: 'expense' }, { name: 'Sin emoji', emoji: '📦', type: 'expense' }]);
+  assert.deepEqual(list.filter((c) => c.type === 'expense' && !c.kind), [{ name: 'Mascota', emoji: '🐶', type: 'expense' }, { name: 'Sin emoji', emoji: '📦', type: 'expense' }]);
   assert.ok(list.some((c) => c.type === 'income')); // se añaden las de ingreso de fábrica
   setCategories(list);
   assert.equal(emojiFor('Mascota'), '🐶');
   assert.equal(emojiFor('Comida'), '📦'); // ya no está en la lista
-  assert.deepEqual(categoriesFor('expense').map((c) => c.name), ['Mascota', 'Sin emoji']);
+  assert.deepEqual(categoriesFor('expense').map((c) => c.name), ['Mascota', 'Sin emoji', 'Fiado', 'Deudas']);
   setCategories(null);
   assert.equal(emojiFor('Comida'), '🍽️');
 });
@@ -364,4 +364,70 @@ test('la copia JSON incluye objetivos y la periodicidad de los recurrentes', () 
   assert.deepEqual(back.goals, goals);
   assert.equal(back.recurring[0].every, 12);
   assert.deepEqual(fromJSON(JSON.stringify({ expenses: [] })).goals, []);
+});
+
+// ---------- Fiado y deudas, reglas de comercio y alta rápida ----------
+import { debtKind, debtBalances, debtCategory, normalizeRules, categorize, applyAuto, quickFromParams } from '../lib.js';
+
+test('fiado y deudas: categorías fijas, saldo por persona y viaje por CSV y JSON', () => {
+  setCategories(null);
+  // Una lista guardada antes de existir Fiado y Deudas las recibe; una «Fiado» que ya existiera queda marcada.
+  const old = normalizeCategories([{ name: 'Comida', emoji: '🍽️' }, { name: 'fiado', emoji: '🙂' }]);
+  assert.deepEqual(old.filter((c) => c.kind).map((c) => `${c.type}:${c.name}:${c.kind}`),
+    ['expense:fiado:lent', 'expense:Deudas:owed', 'income:Fiado:lent', 'income:Deudas:owed']);
+  assert.deepEqual(normalizeCategories(old), old); // estable: no se duplican
+  const mk = (amount, category, type, person) => normalizeExpense({ amount, category, type, person, date: '2026-11-10' });
+  const list = [
+    mk(5000, 'Fiado', 'expense', 'Juan'), mk(2000, 'Fiado', 'income', 'juan'), // presté 50, me devolvió 20
+    mk(10000, 'Deudas', 'income', 'María'), mk(4000, 'Deudas', 'expense', 'María'), // me prestó 100, pagué 40
+    mk(1500, 'Fiado', 'expense', 'Luis'), mk(1500, 'Fiado', 'income', 'Luis'), // saldado
+    mk(700, 'Fiado', 'expense', ''), mk(999, 'Comida', 'expense', 'Juan'), // sin nombre; y uno normal que no cuenta
+  ];
+  assert.equal(debtKind(list[0]), 'lent');
+  assert.equal(debtKind(list[2]), 'owed');
+  assert.equal(debtKind(list[7]), null);
+  assert.deepEqual(debtBalances(list), {
+    people: [{ person: 'María', balance: -6000, count: 2 }, { person: 'Juan', balance: 3000, count: 2 }, { person: 'Sin nombre', balance: 700, count: 1 }],
+    theyOwe: 3700, iOwe: 6000,
+  });
+  assert.equal(debtCategory('lent', 'income'), 'Fiado');
+  assert.match(toCSV([list[0]]), /;Fiado;Tarjeta;;Juan\r\n$/);
+  assert.equal(fromCSV(toCSV(list)).expenses[2].person, 'María');
+  assert.equal(fromJSON(toJSON(list)).expenses[0].person, 'Juan');
+  assert.equal(fromRow(toRow(list[0].id, list[0])).record.person, 'Juan');
+});
+
+test('reglas de comercio: las tuyas ganan, ignoran acentos y solo valen categorías que existen', () => {
+  setCategories(null);
+  const rules = normalizeRules([{ match: ' Café  Pepe ', category: 'Ocio' }, { match: 'cafe pepe', category: 'Casa' }, { match: 'x', category: 'Ocio' }, { match: 'gym', category: 'No existe' }, null]);
+  assert.deepEqual(rules, [{ match: 'cafe pepe', category: 'Ocio' }, { match: 'gym', category: 'No existe' }]);
+  assert.equal(categorize('MERCADONA VALENCIA 123', rules), 'Supermercado'); // regla de fábrica
+  assert.equal(categorize('Café Pepe S.L.', rules), 'Ocio'); // la tuya gana a la de fábrica («cafe» -> Comida)
+  assert.equal(categorize('Gym Center', rules), ''); // la categoría no existe
+  assert.equal(categorize('Tienda rara', rules), '');
+  assert.equal(categorize('', rules), '');
+  assert.deepEqual(fromRow(toRow('meta:rules', { value: rules, updatedAt: 'x' })).record.value, rules);
+  assert.deepEqual(fromJSON(toJSON([], {}, [], { rules })).rules, rules);
+});
+
+test('alta rápida: de la dirección web al movimiento categorizado', () => {
+  setCategories(null);
+  const q = (qs) => quickFromParams(new URLSearchParams(qs), '2026-11-15');
+  assert.equal(q('x=1'), null);
+  const raw = q('importe=12%2C50%20%E2%82%AC&comercio=Mercadona');
+  const e = normalizeExpense({ ...raw, updatedAt: '2026-11-15T09:00:00.000Z' });
+  assert.deepEqual([e.amount, e.note, e.merchant, e.auto, e.category, e.date], [1250, 'Mercadona', 'Mercadona', 'pending', 'Otros', '2026-11-15']);
+  const done = applyAuto(e, [], '2026-11-15T10:00:00.000Z');
+  assert.deepEqual([done.category, done.auto, done.updatedAt], ['Supermercado', 'rule', '2026-11-15T10:00:00.000Z']);
+  // Si el reloj de quien lo apuntó va adelantado, la versión categorizada sigue siendo la más reciente.
+  assert.equal(applyAuto({ ...e, updatedAt: '2026-11-15T10:30:00.000Z' }, [], '2026-11-15T10:00:00.000Z').updatedAt, '2026-11-15T10:30:00.001Z');
+  assert.equal(applyAuto(done), null); // ya no está pendiente
+  const unknown = applyAuto(normalizeExpense(q('importe=3&comercio=Tienda%20rara')));
+  assert.deepEqual([unknown.category, unknown.auto], ['Otros', 'review']);
+  const given = applyAuto(normalizeExpense(q('importe=3&comercio=Mercadona&categoria=Ocio&nota=regalo')));
+  assert.deepEqual([given.category, given.auto, given.note], ['Ocio', 'rule', 'regalo']);
+  // Lo que escribe n8n desde un Atajo: importe como texto y sin categoría.
+  const row = { id: 'q-1', data: JSON.stringify({ amount: '8,40 €', date: '2026-11-15', note: 'Repsol', merchant: 'Repsol', auto: 'pending' }), updatedAt: '2026-11-15T09:00:00.000Z', deleted: false };
+  const pulled = fromRow(row).record;
+  assert.deepEqual([pulled.amount, pulled.auto, applyAuto(pulled).category], [840, 'pending', 'Transporte']);
 });

@@ -71,7 +71,7 @@ const api = http.createServer((req, res) => {
   assert.equal(await A.getAttribute('#add-form [name=note]', 'placeholder'), 'Nota');
   await A.click('#btn-data');
   const folds = A.locator('#data-dialog details.fold');
-  assert.equal(await folds.count(), 2);
+  assert.equal(await folds.count(), 3);
   assert.equal(await folds.nth(0).locator('summary').textContent(), 'Presupuesto mensual por categoría');
   assert.equal(await A.locator('#budgets').isVisible(), false);
   await folds.nth(0).locator('summary').click();

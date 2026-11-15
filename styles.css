@@ -205,6 +205,7 @@ dialog h3 { font-size: 15px; margin: 20px 0 6px; }
       "add view    view"
       "add summary chart"
       "add compare goals"
+      "add debts   debts"
       "add list    list"
       "add status  status";
     align-items: start; gap: 16px;
@@ -215,6 +216,7 @@ dialog h3 { font-size: 15px; margin: 20px 0 6px; }
   .card-chart { grid-area: chart; }
   .card-compare { grid-area: compare; }
   .card-goals { grid-area: goals; }
+  .card-debts { grid-area: debts; }
   .card-list { grid-area: list; }
   #sync-status { grid-area: status; text-align: left; }
   .card { padding: 20px; }
@@ -252,7 +254,7 @@ h1 { display: flex; align-items: center; gap: 10px; }
 /* Modo privado: los importes se difuminan, el resto se ve igual. */
 body.private :is(#month-total, #month-income, #month-balance, .amt, .day span:last-child, .by-cat .line span:last-child,
   #alerts, #chart-detail, .cmp-amt, .cmp-diff, .cmp-before, .goal-amt, .goal-foot small, #cmp-sub, .chart svg text:not(.current), #chart-rows td:not(:first-child), #filter-summary span,
-  .fav b, #add-msg, #recurring-list span, #favorites-list span, #budgets input) {
+  .fav b, #add-msg, #list-msg, #debts-total, #select-count, #recurring-list span, #favorites-list span, #budgets input) {
   filter: blur(7px); user-select: none;
 }
 body.private .chart svg text[text-anchor="middle"] { filter: none; }
@@ -321,3 +323,33 @@ body.locked > header, body.locked > main, body.locked > footer, body.locked .wat
 .rec-new { margin-top: 8px; }
 .recurring li .rec-actions { display: flex; gap: 6px; flex: 0 0 auto; }
 .recurring li .rec-actions button { min-height: 36px; padding: 4px 10px; font-size: 13px; }
+
+/* ---- Fiado y deudas ---- */
+#add-person[hidden], #edit-person[hidden] { display: none; }
+.debts-total { margin: -4px 0 0; }
+.debts { list-style: none; margin: 0; padding: 0; display: grid; font-size: 15px; }
+.debts li { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 10px; align-items: center; padding: 8px 0; border-top: 1px solid var(--line); }
+.debts li:first-child { border-top: 0; padding-top: 0; }
+.debts li.empty { display: block; font-size: 14px; }
+.debts .who { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.debts .amt { font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.debts .amt.pos { color: var(--ok); }
+.debts .amt.neg { color: var(--danger); }
+.debts button { min-height: 36px; padding: 4px 12px; font-size: 14px; }
+
+/* ---- Seleccionar varios movimientos para borrar ---- */
+.card-list .chart-head h2 { margin: 0; }
+.select-bar { display: flex; align-items: center; gap: 8px; }
+.select-bar[hidden] { display: none; }
+.select-bar span { flex: 1; font-size: 14px; color: var(--muted); }
+.select-bar button:disabled { opacity: .45; cursor: default; }
+#select-toggle[aria-pressed="true"] { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+.item .tick { width: 22px; height: 22px; border-radius: 6px; border: 2px solid var(--muted); display: grid; place-items: center; font-size: 14px; line-height: 1; color: var(--accent-text); }
+.item.selecting { grid-template-columns: auto auto 1fr auto; }
+.item.selected { background: var(--chip); }
+.item.selected .tick { background: var(--accent); border-color: var(--accent); }
+.item .flag { color: var(--warn); }
+.rule-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; }
+.rule-row input:first-child { text-align: left; }
+#rules li select { min-height: 36px; padding: 4px 8px; width: auto; max-width: 150px; }
+#rules li .rule-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
